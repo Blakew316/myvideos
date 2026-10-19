@@ -98,13 +98,14 @@ struct FeedAndSyncTests {
 
     @Test func subscriptionMergeKeepsNewestChoicesAndAllSeenUploads() {
         let id = UUID()
-        var mine = Subscription(id: id, url: "u", title: "Old Name")
+        var mine = Subscription(id: id, url: "u", title: "Old Name", createdAt: Date(timeIntervalSince1970: 0))
         mine.seenIDs = ["a", "b"]
         mine.modifiedAt = Date(timeIntervalSince1970: 100)
-        var theirs = Subscription(id: id, url: "u", title: "New Name")
+        var theirs = Subscription(id: id, url: "u", title: "New Name", createdAt: Date(timeIntervalSince1970: 0))
         theirs.seenIDs = ["b", "c"]
         theirs.isEnabled = false
         theirs.modifiedAt = Date(timeIntervalSince1970: 200)
+        theirs.settingsModifiedAt = Date(timeIntervalSince1970: 200)
         let merged = SyncMerge.mergeSubscription(mine, theirs)
         #expect(merged.title == "New Name")
         #expect(!merged.isEnabled)
