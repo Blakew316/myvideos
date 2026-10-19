@@ -107,7 +107,6 @@ struct Snapshots {
         }
         render("library-top", size: CGSize(width: 980, height: 560)) {
             VStack(alignment: .leading, spacing: 36) {
-                LibraryHero(item: items[0], filter: .all, play: {}, reveal: {})
                 QuickActions(model: model)
             }
             .padding(28)

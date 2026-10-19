@@ -77,6 +77,7 @@ final class AppModel {
     var showDownloads = false
     /// The Activity inspector with yt-dlp/ffmpeg output (View › Show Activity).
     var showActivity = false
+    var showStorage = false
     /// The add card was dismissed for this link (so it doesn't pop back up while typing).
     var addCardDismissedFor: String?
     var libraryGrouping: LibraryGrouping = LibraryGrouping(rawValue: UserDefaults.standard.string(forKey: "libraryGrouping") ?? "") ?? .date {

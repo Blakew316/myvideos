@@ -34,6 +34,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.showOnboarding) {
             OnboardingView(model: model)
         }
+        .sheet(isPresented: $model.showStorage) { StorageView(model: model) }
         .sheet(item: $model.subscribeRequest) { request in
             SubscribeSheet(model: model, link: request.link)
         }
@@ -143,7 +144,39 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
+        .safeAreaInset(edge: .bottom) { LibrarySummary(model: model) }
         .animation(.smooth(duration: 0.3), value: model.subscriptions.items.map(\.id))
+    }
+}
+
+/// "12 items · 4.2 GB" at the foot of the sidebar; click for Storage.
+private struct LibrarySummary: View {
+    let model: AppModel
+
+    var body: some View {
+        let items = model.history.items
+        let bytes = items.reduce(Int64(0)) { $0 + ($1.byteCount ?? 0) }
+        Button {
+            model.showStorage = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "internaldrive")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(items.count) item\(items.count == 1 ? "" : "s")")
+                        .font(.caption.weight(.semibold))
+                    Text(bytes > 0 ? "\(ByteSize.string(Double(bytes))) on this Mac" : "Nothing saved yet")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Storage")
     }
 }
 

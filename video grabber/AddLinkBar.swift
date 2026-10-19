@@ -188,7 +188,7 @@ struct AddCard: View {
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: 440)
         .animation(.smooth(duration: 0.25), value: prefs.quality)
     }
 
@@ -196,37 +196,44 @@ struct AddCard: View {
     private var header: some View {
         switch model.displayedPreview {
         case .loaded(let info):
-            HStack(alignment: .top, spacing: 14) {
-                Thumbnail(url: info.thumbnailURL, isAudio: prefs.quality == .audio, cornerRadius: 9)
-                    .frame(width: 176)
+            VStack(alignment: .leading, spacing: 12) {
+                Thumbnail(url: info.thumbnailURL, isAudio: prefs.quality == .audio, cornerRadius: 14)
+                    .frame(width: 400, height: 225)
                     .overlay(alignment: .bottomTrailing) {
                         if let duration = info.duration, !info.isPlaylist {
                             Text(Timecode.string(duration))
-                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .font(.caption.weight(.semibold).monospacedDigit())
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(.black.opacity(0.65), in: Capsule())
-                                .padding(6)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(.black.opacity(0.6), in: Capsule())
+                                .padding(10)
                         }
                     }
-                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
-                VStack(alignment: .leading, spacing: 5) {
+                    .overlay(alignment: .topLeading) {
+                        if info.isPlaylist {
+                            Label("Playlist · \(info.playlistCount ?? 0)", systemImage: "square.stack.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.black.opacity(0.6), in: Capsule())
+                                .padding(10)
+                        }
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+                VStack(alignment: .leading, spacing: 4) {
                     Text(info.title)
-                        .font(.headline)
-                        .lineLimit(3)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(2)
                         .textSelection(.enabled)
-                    Text([info.uploader, info.isPlaylist ? "\(info.playlistCount ?? 0) videos" : nil]
-                            .compactMap { $0 }.joined(separator: " · "))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
                     HStack(spacing: 8) {
+                        Text(info.uploader ?? info.site ?? "")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
                         if let existing = model.existingDownload(link: model.trimmedURL, info: info) {
                             Label("In Your Library", systemImage: "checkmark.circle.fill")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.green)
-                                .lineLimit(1)
                                 .help("Downloaded \(existing.date.formatted(date: .abbreviated, time: .shortened))")
                         }
                         if let link = model.subscribableLink, !model.subscriptions.contains(url: link) {
@@ -241,8 +248,8 @@ struct AddCard: View {
                             .help("Download new uploads from \(info.uploader ?? "this channel") automatically")
                         }
                     }
+                    .font(.callout)
                 }
-                .frame(minHeight: 99)
             }
         case .failed(let message):
             HStack(spacing: 12) {
