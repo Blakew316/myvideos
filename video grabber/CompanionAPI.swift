@@ -247,6 +247,9 @@ enum CompanionAPI {
             "music": music,
             "thumbnail": job.info?.thumbnailURL?.absoluteString ?? "",
             "isAudio": job.options.isAudio,
+            "url": job.url,
+            "error": job.technicalError ?? "",
+            "files": job.savedFiles.map(\.path),
         ]
     }
 
@@ -375,6 +378,7 @@ enum CompanionAPI {
             "bytes": item.byteCount ?? 0,
             "thumbnail": item.thumbnailURL?.absoluteString ?? "",
             "source": item.sourceURL,
+            "path": item.fileURLs.first { FileManager.default.fileExists(atPath: $0.path) }?.path ?? "",
             "device": item.deviceName ?? "",
             "files": files,
             "canUpgrade": !item.isAudio && item.quality != .best,
