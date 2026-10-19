@@ -30,6 +30,8 @@ struct PlayerView: View {
     @State private var artist = ""
     @State private var savedFrame: URL?
     @State private var frameError = false
+    /// Shown briefly when playback picked up where it left off.
+    @State private var resumedFrom: Double?
 
     init(url: URL) {
         self.url = url
@@ -75,6 +77,21 @@ struct PlayerView: View {
                 .glassEffect(.regular, in: .capsule)
                 .padding(.top, 14)
                 .transition(.move(edge: .top).combined(with: .opacity))
+            } else if let resumedFrom {
+                HStack(spacing: 10) {
+                    Text("Resumed from \(Timecode.string(resumedFrom))")
+                    Button("Start Over") {
+                        player.seek(to: .zero)
+                        self.resumedFrom = nil
+                    }
+                    .buttonStyle(.link)
+                }
+                .font(.callout)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .glassEffect(.regular, in: .capsule)
+                .padding(.top, 14)
+                .transition(.move(edge: .top).combined(with: .opacity))
             } else if frameError {
                 Label("Couldn’t save this frame.", systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
@@ -85,9 +102,27 @@ struct PlayerView: View {
             }
         }
         .animation(.smooth(duration: 0.3), value: savedFrame)
+        .animation(.smooth(duration: 0.3), value: resumedFrom)
         .task { await loadMetadata() }
-        .onAppear { player.play() }
-        .onDisappear { player.pause() }
+        .onAppear {
+            if let position = AppModel.shared.resumePosition(for: url), position > 0 {
+                player.seek(to: CMTime(seconds: position, preferredTimescale: 600))
+                resumedFrom = position
+                Task {
+                    try? await Task.sleep(for: .seconds(5))
+                    resumedFrom = nil
+                }
+            }
+            player.play()
+        }
+        .onDisappear {
+            player.pause()
+            let position = player.currentTime().seconds
+            let itemDuration = player.currentItem?.duration.seconds ?? .nan
+            if position.isFinite, itemDuration.isFinite {
+                AppModel.shared.recordPlayback(of: url, position: position, duration: itemDuration)
+            }
+        }
     }
 
     private var audioBackdrop: some View {
@@ -100,7 +135,7 @@ struct PlayerView: View {
                     .opacity(0.7)
                     .ignoresSafeArea()
             } else {
-                LinearGradient(colors: [Brand.slate.opacity(0.5), .black], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [Color(white: 0.22), .black], startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
             }
             VStack(spacing: 18) {

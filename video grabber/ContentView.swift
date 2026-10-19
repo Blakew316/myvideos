@@ -32,9 +32,28 @@ struct ContentView: View {
                 }
         }
         .frame(minWidth: 900, minHeight: 620)
-        .inspector(isPresented: $model.showActivity) {
-            ActivityInspector(log: model.activityLog)
-                .inspectorColumnWidth(min: 280, ideal: 360, max: 600)
+        .inspector(isPresented: $model.showInspector) {
+            LibraryInspector(model: model)
+                .inspectorColumnWidth(min: 260, ideal: 300, max: 520)
+                .toolbar {
+                    Button {
+                        model.showInspector.toggle()
+                    } label: {
+                        Label("Show Info", systemImage: "info.circle")
+                    }
+                    .help("Show Info (⌘I)")
+                }
+        }
+        .sheet(item: $model.collectionEditor) { request in
+            CollectionEditor(model: model, existing: request.existing, smart: request.smart, initialItemIDs: request.itemIDs)
+        }
+        .onChange(of: model.selection) {
+            // Keep only selected items that are still in view on the new page.
+            let scope = model.selection.flatMap { LibraryScope($0) }
+            model.librarySelection = model.librarySelection.filter { id in
+                guard let scope, let item = model.history.item(id: id) else { return false }
+                return scope.includes(item, collections: model.collections)
+            }
         }
         .sheet(isPresented: $model.showOnboarding) {
             OnboardingView(model: model)
@@ -64,9 +83,15 @@ struct ContentView: View {
     private var detail: some View {
         switch model.selection ?? .home {
         case .library(let filter):
-            LibraryView(model: model, filter: filter)
+            LibraryView(model: model, scope: .filter(filter))
                 .id(filter)
                 .safeAreaInset(edge: .top, spacing: 0) { NoticeStrip(model: model) }
+        case .collection(let id):
+            if model.collections.collection(id: id) != nil {
+                LibraryView(model: model, scope: .collection(id)).id(id)
+            } else {
+                ContentUnavailableView("Collection Not Found", systemImage: "rectangle.stack")
+            }
         case .subscriptions:
             SubscriptionsOverview(model: model)
         case .subscription(let id):
@@ -127,6 +152,30 @@ struct ContentView: View {
                     .buttonStyle(.borderless)
                     .help("Follow a Channel")
                     .accessibilityLabel("Follow a Channel")
+                }
+            }
+
+            Section {
+                ForEach(model.collections.items) { collection in
+                    CollectionRow(collection: collection, model: model)
+                        .tag(SidebarItem.collection(collection.id))
+                }
+            } header: {
+                HStack {
+                    Text("Collections")
+                    Spacer()
+                    Menu {
+                        Button("New Collection") { model.collectionEditor = .init() }
+                        Button("New Smart Collection") { model.collectionEditor = .init(smart: true) }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.borderless)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("New Collection")
+                    .accessibilityLabel("New Collection")
                 }
             }
 
@@ -250,43 +299,58 @@ private struct NoticeStrip: View {
     }
 }
 
-// MARK: - Activity inspector
+// MARK: - Collections
 
-private struct ActivityInspector: View {
-    let log: String
+/// A collection in the sidebar. Drop library items on a hand-made one to add them.
+private struct CollectionRow: View {
+    let collection: LibraryCollection
+    let model: AppModel
+    @State private var isTargeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Activity").font(.headline)
-                Spacer()
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(log, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
+        Label(collection.name, systemImage: collection.symbol)
+            .lineLimit(1)
+            .badge(count)
+            .padding(.vertical, 1)
+            .background {
+                if isTargeted {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                        .padding(-4)
                 }
-                .buttonStyle(.borderless)
-                .help("Copy Log")
-                .disabled(log.isEmpty)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            Divider()
-            if log.isEmpty {
-                ContentUnavailableView("No Activity Yet", systemImage: "text.alignleft",
-                                       description: Text("Technical details from yt-dlp and ffmpeg appear here while they run."))
-            } else {
-                ScrollView {
-                    Text(log)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(14)
+            .dropDestination(for: URL.self) { urls, _ in
+                guard !collection.isSmart else { return false }
+                let ids = droppedItemIDs(urls)
+                guard !ids.isEmpty else { return false }
+                model.collections.add(itemIDs: ids, to: collection.id)
+                return true
+            } isTargeted: { isTargeted = $0 && !collection.isSmart }
+            .contextMenu {
+                if collection.isSmart {
+                    Button("Edit Smart Collection…") { model.collectionEditor = .init(existing: collection, smart: true) }
+                } else {
+                    Button("Rename…") { model.collectionEditor = .init(existing: collection) }
                 }
-                .defaultScrollAnchor(.bottom)
+                Divider()
+                Button("Delete Collection", role: .destructive) {
+                    if model.selection == .collection(collection.id) { model.selection = .home }
+                    model.collections.delete(collection.id)
+                }
             }
+    }
+
+    private var count: Int {
+        model.history.items.filter { collection.includes($0) }.count
+    }
+
+    /// Items dragged from the library are known by ID; files from Finder are matched by path.
+    private func droppedItemIDs(_ urls: [URL]) -> [UUID] {
+        if !model.draggingItemIDs.isEmpty {
+            defer { model.draggingItemIDs = [] }
+            return model.draggingItemIDs
         }
+        let paths = Set(urls.filter(\.isFileURL).map(\.path))
+        return model.history.items.filter { $0.filePaths.contains(where: paths.contains) }.map(\.id)
     }
 }

@@ -9,13 +9,14 @@ import SystemConfiguration
 import UserNotifications
 
 enum LibraryFilter: String, Hashable, CaseIterable {
-    case all, videos, music
+    case all, videos, music, unwatched
 
     var title: String {
         switch self {
         case .all: return "All"
         case .videos: return "Videos"
         case .music: return "Music"
+        case .unwatched: return "Unwatched"
         }
     }
 
@@ -24,14 +25,23 @@ enum LibraryFilter: String, Hashable, CaseIterable {
         case .all: return "square.grid.2x2"
         case .videos: return "play.rectangle"
         case .music: return "music.note"
+        case .unwatched: return "play.circle"
         }
     }
 
+    /// Downloads still in progress (they'll all be unwatched).
     func includes(isAudio: Bool) -> Bool {
         switch self {
-        case .all: return true
+        case .all, .unwatched: return true
         case .videos: return !isAudio
         case .music: return isAudio
+        }
+    }
+
+    func includes(_ item: HistoryItem) -> Bool {
+        switch self {
+        case .unwatched: return !item.isWatched
+        default: return includes(isAudio: item.isAudio)
         }
     }
 }
@@ -40,6 +50,7 @@ enum SidebarItem: Hashable {
     case library(LibraryFilter)
     case subscriptions
     case subscription(UUID)
+    case collection(UUID)
     case convert
 
     static let home = SidebarItem.library(.all)
@@ -49,6 +60,12 @@ enum LibraryGrouping: String, CaseIterable, Identifiable {
     case date, channel
     var id: String { rawValue }
     var title: String { self == .date ? "Date Added" : "Channel" }
+}
+
+enum InspectorPane: String, CaseIterable, Identifiable {
+    case info, activity
+    var id: String { rawValue }
+    var title: String { self == .info ? "Info" : "Activity" }
 }
 
 enum LibraryLayout: String, CaseIterable, Identifiable {
@@ -70,6 +87,7 @@ final class AppModel {
     let subscriptions = SubscriptionStore()
     let sync = SyncService()
     let signIn = SignInStatus()
+    let collections = CollectionStore()
 
     /// The Mac's name as shown in Sharing settings, recorded with each download.
     static let deviceName: String = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "This Mac"
@@ -82,8 +100,22 @@ final class AppModel {
     var showOnboarding = false
     /// The Safari-style Downloads popover in the toolbar.
     var showDownloads = false
-    /// The Activity inspector with yt-dlp/ffmpeg output (View › Show Activity).
-    var showActivity = false
+    /// The inspector: Info about the selection, or Activity with yt-dlp/ffmpeg output.
+    var showInspector = false
+    var inspectorPane: InspectorPane = .info
+    var showActivity: Bool {
+        get { showInspector && inspectorPane == .activity }
+        set { inspectorPane = .activity; showInspector = newValue }
+    }
+    var showInfo: Bool {
+        get { showInspector && inspectorPane == .info }
+        set { inspectorPane = .info; showInspector = newValue }
+    }
+    /// What's selected in the library (shown in the Info inspector).
+    var librarySelection = Set<HistoryItem.ID>()
+    /// Items being dragged out of the library, so a drop on a collection knows what they are.
+    var draggingItemIDs: [HistoryItem.ID] = []
+    var collectionEditor: CollectionEditorRequest?
     var showStorage = false
     /// The add card was dismissed for this link (so it doesn't pop back up while typing).
     var addCardDismissedFor: String?
@@ -189,8 +221,13 @@ final class AppModel {
         Diagnostics.shared.start()
 
         NotificationCenter.default.addObserver(forName: .myVideosLocalDataChanged, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { AppModel.shared.sync.scheduleSync(model: AppModel.shared) }
+            MainActor.assumeIsolated {
+                let model = AppModel.shared
+                model.sync.scheduleSync(model: model)
+                SpotlightIndex.schedule(model.history.items, enabled: model.prefs.spotlightEnabled)
+            }
         }
+        SpotlightIndex.schedule(history.items, enabled: prefs.spotlightEnabled)
         sync.configure(enabled: prefs.iCloudSync, model: self)
         CompanionServer.shared.handler = { await CompanionAPI.handle($0) }
         if prefs.companionEnabled { CompanionServer.shared.start() }
@@ -678,6 +715,48 @@ final class AppModel {
         for item in history.items where item.filePaths.contains(where: paths.contains) {
             history.update(item.id) { $0.lastPlayedAt = Date() }
         }
+    }
+
+    func markWatched(_ ids: Set<HistoryItem.ID>, _ watched: Bool) {
+        for id in ids {
+            history.update(id) { item in
+                item.watched = watched
+                item.playbackPosition = nil
+                item.watchModifiedAt = Date()
+            }
+        }
+    }
+
+    /// Called by the player as it closes: remembers where to resume, or marks it watched
+    /// when it was played (nearly) to the end.
+    func recordPlayback(of file: URL, position: Double, duration: Double) {
+        guard duration > 0, let item = history.items.first(where: { $0.filePaths.contains(file.path) }) else { return }
+        let finished = position >= duration * 0.92 || duration - position < 20
+        let worthResuming = position > 15 && duration > 120
+        history.update(item.id) { item in
+            if finished {
+                item.watched = true
+                item.playbackPosition = nil
+            } else {
+                // Opening it isn't watching it; keep an earlier "watched" though.
+                if item.watched == nil { item.watched = false }
+                if worthResuming { item.playbackPosition = position }
+            }
+            item.watchModifiedAt = Date()
+        }
+    }
+
+    /// Where to start playing a file from, if it was left part-way.
+    func resumePosition(for file: URL) -> Double? {
+        history.items.first(where: { $0.filePaths.contains(file.path) })?.playbackPosition
+    }
+
+    /// Opens the main window on an item (from Spotlight): selects it and shows Info.
+    func reveal(itemID: HistoryItem.ID) {
+        guard history.item(id: itemID) != nil else { return }
+        selection = .home
+        librarySelection = [itemID]
+        showInfo = true
     }
 
     func redownload(_ item: HistoryItem) {

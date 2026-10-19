@@ -13,6 +13,9 @@ nonisolated struct SyncPayload: Codable, Sendable, Equatable {
     var subscriptions: [Subscription] = []
     var subscriptionTombstones: Set<UUID> = []
     var settings: SyncedSettings?
+    // Optional so payloads written by older versions still decode.
+    var collections: [LibraryCollection]?
+    var collectionTombstones: Set<UUID>?
 }
 
 /// Pure merge rules, kept separate so they're easy to test.
@@ -24,7 +27,17 @@ nonisolated enum SyncMerge {
 
         result.historyTombstones = local.historyTombstones.union(remote.historyTombstones)
         var historyByID: [UUID: HistoryItem] = [:]
-        for item in remote.history + local.history { historyByID[item.id] = item }  // local wins
+        for item in remote.history { historyByID[item.id] = item }
+        for item in local.history {  // local wins, except for newer watch state from elsewhere
+            var merged = item
+            if let other = historyByID[item.id],
+               (other.watchModifiedAt ?? .distantPast) > (item.watchModifiedAt ?? .distantPast) {
+                merged.watched = other.watched
+                merged.playbackPosition = other.playbackPosition
+                merged.watchModifiedAt = other.watchModifiedAt
+            }
+            historyByID[item.id] = merged
+        }
         result.history = historyByID.values
             .filter { !result.historyTombstones.contains($0.id) }
             .sorted { $0.date > $1.date }
@@ -40,6 +53,17 @@ nonisolated enum SyncMerge {
         result.subscriptions = subsByID.values
             .filter { !result.subscriptionTombstones.contains($0.id) }
             .sorted { $0.createdAt < $1.createdAt }
+
+        let collectionTombstones = (local.collectionTombstones ?? []).union(remote.collectionTombstones ?? [])
+        var collectionsByID: [UUID: LibraryCollection] = [:]
+        for collection in (remote.collections ?? []) + (local.collections ?? []) {
+            if let existing = collectionsByID[collection.id], existing.modifiedAt > collection.modifiedAt { continue }
+            collectionsByID[collection.id] = collection
+        }
+        result.collections = collectionsByID.values
+            .filter { !collectionTombstones.contains($0.id) }
+            .sorted { $0.createdAt < $1.createdAt }
+        result.collectionTombstones = collectionTombstones
 
         switch (local.settings, remote.settings) {
         case let (l?, r?): result.settings = r.modified > l.modified ? r : l
@@ -153,7 +177,9 @@ final class SyncService {
                                 historyTombstones: model.history.tombstones,
                                 subscriptions: model.subscriptions.items,
                                 subscriptionTombstones: model.subscriptions.tombstones,
-                                settings: model.prefs.syncedSettings)
+                                settings: model.prefs.syncedSettings,
+                                collections: model.collections.items,
+                                collectionTombstones: model.collections.tombstones)
 
         switch result {
         case .failure(let error):
@@ -163,6 +189,10 @@ final class SyncService {
             let merged = remote.map { SyncMerge.merge(local: local, remote: $0) } ?? local
             model.history.replace(with: merged.history, tombstones: merged.historyTombstones)
             model.subscriptions.replace(with: merged.subscriptions, tombstones: merged.subscriptionTombstones)
+            model.collections.replace(with: merged.collections ?? [], tombstones: merged.collectionTombstones ?? [])
+            if merged.history != local.history {
+                SpotlightIndex.schedule(model.history.items, enabled: model.prefs.spotlightEnabled)
+            }
             if let settings = merged.settings { model.prefs.apply(settings) }
             model.processQueue()  // a synced "simultaneous downloads" change may free slots
 

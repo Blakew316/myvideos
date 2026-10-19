@@ -70,6 +70,7 @@ private struct GeneralSettings: View {
                 Toggle("Notify me when downloads finish", isOn: $prefs.notificationsEnabled)
                 Toggle("Offer to download links I copy", isOn: $prefs.clipboardDetection)
                 Toggle("Show My Videos in the menu bar", isOn: $prefs.showMenuBarExtra)
+                Toggle("Show downloads in Spotlight", isOn: $prefs.spotlightEnabled)
             } header: {
                 Text("Convenience")
             } footer: {

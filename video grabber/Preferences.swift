@@ -58,6 +58,13 @@ final class Preferences {
     var cleanupAfterDays: Int { didSet { save(cleanupAfterDays, Keys.cleanupDays) } }
     /// Lets the iPhone app connect over the local network.
     var companionEnabled: Bool { didSet { save(companionEnabled, Keys.companion) } }
+    /// Downloads show up in Spotlight searches.
+    var spotlightEnabled: Bool {
+        didSet {
+            save(spotlightEnabled, Keys.spotlight)
+            Task { @MainActor in SpotlightIndex.schedule(AppModel.shared.history.items, enabled: spotlightEnabled) }
+        }
+    }
 
     /// When a synced setting last changed here; the newer side wins when syncing.
     private(set) var syncedSettingsModified: Date
@@ -95,6 +102,7 @@ final class Preferences {
         static let avoidMetered = "avoidMeteredNetworks"
         static let cleanupDays = "cleanupAfterDays"
         static let companion = "companionEnabled"
+        static let spotlight = "spotlightEnabled"
         static let syncedModified = "syncedSettingsModified"
     }
 
@@ -142,6 +150,7 @@ final class Preferences {
         avoidMeteredNetworks = bool(Keys.avoidMetered, false)
         cleanupAfterDays = int(Keys.cleanupDays, 0)
         companionEnabled = bool(Keys.companion, false)
+        spotlightEnabled = bool(Keys.spotlight, true)
         syncedSettingsModified = d.object(forKey: Keys.syncedModified) as? Date ?? .distantPast
 
         if let path = d.string(forKey: Keys.destination), FileManager.default.fileExists(atPath: path) {

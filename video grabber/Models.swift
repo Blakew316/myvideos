@@ -474,9 +474,23 @@ nonisolated struct HistoryItem: Codable, Sendable, Identifiable, Equatable {
     var lastPlayedAt: Date?
     /// Set when Smart Cleanup moved the file to the Trash.
     var cleanedUpAt: Date?
+    /// Marked watched (true) or unwatched (false); nil falls back to "has it been opened".
+    var watched: Bool?
+    /// Where playback stopped in the built-in player, for resuming.
+    var playbackPosition: Double?
+    /// When `watched` or `playbackPosition` last changed, so the newer one wins in sync.
+    var watchModifiedAt: Date?
 
     var fileURLs: [URL] { filePaths.map { URL(fileURLWithPath: $0) } }
     var primaryFile: URL? { fileURLs.first }
+
+    var isWatched: Bool { watched ?? (lastPlayedAt != nil) }
+
+    /// How far through it is (0...1), when it was left part-way.
+    var watchProgress: Double? {
+        guard let position = playbackPosition, let duration, duration > 0, position > 0 else { return nil }
+        return min(position / duration, 1)
+    }
 }
 
 // MARK: - Link identity

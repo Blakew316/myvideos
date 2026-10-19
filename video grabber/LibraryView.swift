@@ -11,12 +11,42 @@ import AppKit
 import QuickLook
 import UniformTypeIdentifiers
 
+/// What a library page shows: one of the built-in filters or a collection.
+enum LibraryScope: Hashable {
+    case filter(LibraryFilter)
+    case collection(UUID)
+
+    init?(_ item: SidebarItem) {
+        switch item {
+        case .library(let filter): self = .filter(filter)
+        case .collection(let id): self = .collection(id)
+        default: return nil
+        }
+    }
+
+    func includes(_ item: HistoryItem, collections: CollectionStore) -> Bool {
+        switch self {
+        case .filter(let filter): return filter.includes(item)
+        case .collection(let id): return collections.collection(id: id)?.includes(item) ?? false
+        }
+    }
+}
+
 struct LibraryView: View {
     @Bindable var model: AppModel
-    let filter: LibraryFilter
+    let scope: LibraryScope
 
     @State private var search = ""
-    @State private var selection = Set<HistoryItem.ID>()
+    /// Shared with the Info inspector.
+    private var selection: Set<HistoryItem.ID> {
+        get { model.librarySelection }
+        nonmutating set { model.librarySelection = newValue }
+    }
+    private var filter: LibraryFilter? { if case .filter(let filter) = scope { return filter } else { return nil } }
+    private var collection: LibraryCollection? {
+        if case .collection(let id) = scope { return model.collections.collection(id: id) } else { return nil }
+    }
+    private var title: String { collection?.name ?? filter?.title ?? "" }
     @State private var quickLookURL: URL?
     @State private var pendingRemoval: Set<HistoryItem.ID> = []
     @State private var isDropTargeted = false
@@ -30,16 +60,25 @@ struct LibraryView: View {
 
     private var items: [HistoryItem] {
         let query = search.trimmingCharacters(in: .whitespaces)
-        return model.history.items.filter { item in
-            guard filter.includes(isAudio: item.isAudio) else { return false }
+        let collection = collection
+        let items = model.history.items.filter { item in
+            if let collection { guard collection.includes(item) else { return false } }
+            if let filter { guard filter.includes(item) else { return false } }
             guard !query.isEmpty else { return true }
             return item.title.localizedCaseInsensitiveContains(query)
                 || (item.uploader?.localizedCaseInsensitiveContains(query) ?? false)
         }
+        // Hand-made collections keep the order things were added in.
+        if let collection, !collection.isSmart {
+            let order = Dictionary(uniqueKeysWithValues: collection.itemIDs.enumerated().map { ($1, $0) })
+            return items.sorted { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
+        }
+        return items
     }
 
     private var pending: [DownloadJob] {
         let query = search.trimmingCharacters(in: .whitespaces)
+        guard let filter else { return [] }
         return model.pendingJobs.filter { job in
             filter.includes(isAudio: job.options.isAudio)
                 && (query.isEmpty || job.displayTitle.localizedCaseInsensitiveContains(query))
@@ -56,7 +95,8 @@ struct LibraryView: View {
         var order: [String] = []
         var byKey: [String: [HistoryItem]] = [:]
         for item in items {
-            let key = model.libraryGrouping == .date ? Self.dateBucket(item.date) : (item.uploader ?? "Other")
+            let key = collection?.isSmart == false ? collection?.name ?? ""
+                : model.libraryGrouping == .date ? Self.dateBucket(item.date) : (item.uploader ?? "Other")
             if byKey[key] == nil { order.append(key) }
             byKey[key, default: []].append(item)
         }
@@ -113,7 +153,7 @@ struct LibraryView: View {
                         .transition(.opacity)
                 }
             }
-            .navigationTitle(filter.title)
+            .navigationTitle(title)
             .navigationSubtitle(subtitle)
             .searchable(text: $search, placement: .sidebar, prompt: "Search Library")
             // ⌘V anywhere in the library starts a download from the copied link.
@@ -168,17 +208,38 @@ struct LibraryView: View {
                         .controlSize(.large)
                 }
             } else {
-                ContentUnavailableView {
-                    Label(filter == .music ? "No Music Yet" : "No Videos Yet", systemImage: filter.symbol)
-                } description: {
-                    Text(filter == .music ? "Choose Audio when you download to save songs here."
-                                          : "Videos you download appear here.")
-                }
+                emptyScope
             }
         } else if model.libraryLayout == .list {
             listContent
         } else {
             gridContent
+        }
+    }
+
+    @ViewBuilder
+    private var emptyScope: some View {
+        if let collection {
+            ContentUnavailableView {
+                Label(collection.isSmart ? "Nothing Matches" : "Empty Collection", systemImage: collection.symbol)
+            } description: {
+                Text(collection.isSmart ? "Items that match this smart collection’s rules appear here."
+                                        : "Drag items here from your library, or choose Add to Collection when you right-click one.")
+            } actions: {
+                if collection.isSmart {
+                    Button("Edit Rules…") { model.collectionEditor = .init(existing: collection, smart: true) }
+                }
+            }
+        } else if filter == .unwatched {
+            ContentUnavailableView("All Caught Up", systemImage: "checkmark.circle",
+                                   description: Text("Everything in your library has been watched."))
+        } else {
+            ContentUnavailableView {
+                Label(filter == .music ? "No Music Yet" : "No Videos Yet", systemImage: filter?.symbol ?? "play.rectangle")
+            } description: {
+                Text(filter == .music ? "Choose Audio when you download to save songs here."
+                                      : "Videos you download appear here.")
+            }
         }
     }
 
@@ -202,6 +263,7 @@ struct LibraryView: View {
                                 select(item, additive: additive)
                             }
                             .contextMenu { menu(for: selection.contains(item.id) ? selection : [item.id], primary: item) }
+                            .onDrag { dragProvider(for: item) }
                             .transition(.opacity)
                         }
                     }
@@ -241,9 +303,13 @@ struct LibraryView: View {
                 .frame(maxHeight: min(CGFloat(pending.count) * 84, 220))
                 Divider()
             }
-            Table(items.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+            Table(of: HistoryItem.self, selection: $model.librarySelection, sortOrder: $sortOrder) {
                 TableColumn("Title", value: \.title) { item in
                     HStack(spacing: 10) {
+                        Circle()
+                            .fill(item.isWatched ? Color.clear : Color.accentColor)
+                            .frame(width: 7, height: 7)
+                            .help(item.isWatched ? "" : "Unwatched")
                         Thumbnail(url: item.thumbnailURL, isAudio: item.isAudio, cornerRadius: 3)
                             .frame(width: 48, height: 27)
                         Text(item.title).lineLimit(1)
@@ -278,6 +344,10 @@ struct LibraryView: View {
                         .foregroundStyle(.secondary)
                 }
                 .width(min: 110, ideal: 150)
+            } rows: {
+                ForEach(items.sorted(using: sortOrder)) { item in
+                    TableRow(item).itemProvider { dragProvider(for: item) }
+                }
             }
             .tableStyle(.inset(alternatesRowBackgrounds: true))
             .contextMenu(forSelectionType: HistoryItem.ID.self) { ids in
@@ -326,6 +396,20 @@ struct LibraryView: View {
 
     // MARK: Actions
 
+    /// Drags a copy of the file out (Finder, Messages, editors) and, within the app, the
+    /// item itself so it can be dropped on a collection.
+    private func dragProvider(for item: HistoryItem) -> NSItemProvider {
+        let ids = selection.contains(item.id) ? Array(selection) : [item.id]
+        model.draggingItemIDs = ids
+        guard let file = files(of: [item.id]).first, let provider = NSItemProvider(contentsOf: file) else {
+            return NSItemProvider()
+        }
+        provider.suggestedName = file.lastPathComponent
+        // Only this app sees the file's own address, so other apps always get a copy.
+        provider.registerObject(file as NSURL, visibility: .ownProcess)
+        return provider
+    }
+
     private func files(of ids: Set<HistoryItem.ID>) -> [URL] {
         ids.compactMap(model.history.item(id:)).flatMap(\.fileURLs)
             .filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -362,6 +446,10 @@ struct LibraryView: View {
             .disabled(files.isEmpty)
         Button("Quick Look") { selection = ids; quickLookURL = files.first }
             .disabled(files.isEmpty)
+        Button("Show Info") {
+            selection = ids
+            model.showInfo = true
+        }
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }
             .disabled(files.isEmpty)
         Button("Open With Default App") {
@@ -369,6 +457,26 @@ struct LibraryView: View {
             files.prefix(10).forEach { NSWorkspace.shared.open($0) }
         }
         .disabled(files.isEmpty)
+        Divider()
+        let chosen = ids.compactMap(model.history.item(id:))
+        if chosen.contains(where: { !$0.isWatched }) {
+            Button("Mark as Watched") { model.markWatched(ids, true) }
+        }
+        if chosen.contains(where: \.isWatched) || chosen.contains(where: { $0.watchProgress != nil }) {
+            Button("Mark as Unwatched") { model.markWatched(ids, false) }
+        }
+        Menu("Add to Collection") {
+            ForEach(model.collections.items.filter { !$0.isSmart }) { collection in
+                Button(collection.name) { model.collections.add(itemIDs: Array(ids), to: collection.id) }
+            }
+            if model.collections.items.contains(where: { !$0.isSmart }) { Divider() }
+            Button("New Collection from Selection…") {
+                model.collectionEditor = .init(itemIDs: chosen.sorted { $0.date > $1.date }.map(\.id))
+            }
+        }
+        if let collection, !collection.isSmart {
+            Button("Remove from “\(collection.name)”") { model.collections.remove(itemIDs: ids, from: collection.id) }
+        }
         Divider()
         if item.isAudio {
             Button("Add to Apple Music") { model.addToMusic(item) }
@@ -417,9 +525,18 @@ struct LibraryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Thumbnail(url: item.thumbnailURL, isAudio: item.isAudio, cornerRadius: 12)
+            SkimmableArtwork(item: item, cornerRadius: 12)
+                .overlay(alignment: .bottom) {
+                    if let progress = item.watchProgress, !item.isWatched {
+                        WatchProgressBar(progress: progress)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .overlay {
-                    if hovering && available {
+                    // Videos skim under the pointer instead; songs and playlists get a play button.
+                    if hovering && available && (item.isAudio || item.isPlaylist) {
                         Button(action: play) {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 16, weight: .semibold))
@@ -436,7 +553,7 @@ struct LibraryCard: View {
                 }
                 .overlay(alignment: .bottomTrailing) { badges }
                 .overlay(alignment: .bottomLeading) {
-                    if let duration = item.duration, duration > 0, !item.isPlaylist {
+                    if let duration = item.duration, duration > 0, !item.isPlaylist, item.isWatched || item.watchProgress == nil {
                         Text(Timecode.string(duration))
                             .font(.caption2.weight(.semibold).monospacedDigit())
                             .foregroundStyle(.white)
@@ -454,10 +571,19 @@ struct LibraryCard: View {
                 .opacity(available ? 1 : 0.5)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(2)
-                    .foregroundStyle(.primary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if !item.isWatched {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 7, height: 7)
+                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                            .accessibilityLabel("Unwatched")
+                    }
+                    Text(item.title)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(2)
+                        .foregroundStyle(.primary)
+                }
                 Text(caption)
                     .font(.caption)
                     .foregroundStyle(available ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))

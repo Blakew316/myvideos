@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AppKit
+import CoreSpotlight
 
 @main
 struct MyVideosApp: App {
@@ -96,6 +97,16 @@ private struct AppCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Convert Files…") { show(.convert) }
+            Button("New Collection") {
+                openWindow(id: "main")
+                model.collectionEditor = .init()
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
+            Button("New Smart Collection…") {
+                openWindow(id: "main")
+                model.collectionEditor = .init(smart: true)
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option, .control])
             Divider()
             Button("Sign In to a Site…") { openWindow(id: "signin") }
         }
@@ -117,6 +128,8 @@ private struct AppCommands: Commands {
                 model.showDownloads.toggle()
             }
             .keyboardShortcut("l", modifiers: [.command, .option])
+            Button(model.showInfo ? "Hide Info" : "Show Info") { model.showInfo.toggle() }
+                .keyboardShortcut("i")
             Button(model.showActivity ? "Hide Activity" : "Show Activity") { model.showActivity.toggle() }
                 .keyboardShortcut("a", modifiers: [.command, .option])
             Divider()
@@ -155,6 +168,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
         return .terminateCancel
+    }
+
+    /// A Spotlight result was chosen: show that item.
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity,
+                     restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == CSSearchableItemActionType,
+              let identifier = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+              let id = UUID(uuidString: identifier) else { return false }
+        AppModel.shared.reveal(itemID: id)
+        NSApp.activate()
+        return true
     }
 
     /// myvideos://download?url=… from the Share extension or Shortcuts; video and audio
