@@ -529,7 +529,11 @@ final class DownloadJob: Identifiable {
                "content isn't available", "no longer available") {
             return "This video has been removed or made private, so it can’t be downloaded."
         }
-        if has("unsupported url", "no suitable", "is not a valid url") {
+        if has("unsupported url") {
+            let host = URL(string: url)?.host(percentEncoded: false)?.replacingOccurrences(of: "www.", with: "") ?? "this site"
+            return "\(host) isn’t a supported site, so there’s nothing My Videos can download from it."
+        }
+        if has("no suitable", "is not a valid url") {
             return "No video was found at this link. Open the video itself (not a search, home or profile page) and copy its address."
         }
         if has("unable to extract", "cannot parse data", "unable to parse") {

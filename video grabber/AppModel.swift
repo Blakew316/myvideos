@@ -395,7 +395,9 @@ final class AppModel {
         let text = error.lowercased()
         func has(_ needles: String...) -> Bool { needles.contains { text.contains($0) } }
         let host = URL(string: url)?.host(percentEncoded: false)?.replacingOccurrences(of: "www.", with: "") ?? "the site"
-        if has("unsupported url", "is not a valid url") { return "This site isn’t supported." }
+        if has("unsupported url", "is not a valid url") {
+            return "\(host) isn’t a supported site, so there’s nothing My Videos can download from it."
+        }
         if has("ip address is blocked", "not available in your country", "geo restrict", "geo-restrict", "not available in your region") {
             return "This isn’t available where you are: \(host) blocks it for your location or network."
         }
