@@ -9,12 +9,20 @@ import AppKit
 // MARK: - Brand
 
 enum Brand {
-    /// The app's one color: a soft graphite, like brushed aluminum.
-    static let graphite = Color(red: 0.42, green: 0.43, blue: 0.46)
+    /// The signature color: a deep sapphire, used for actions and selection.
+    static let sapphire = Color("AccentColor")
+    // Muted jewel tones for icons — present, never loud.
+    static let sage = Color(red: 0.42, green: 0.60, blue: 0.50)
+    static let slate = Color(red: 0.36, green: 0.48, blue: 0.68)
+    static let rose = Color(red: 0.74, green: 0.45, blue: 0.52)
+    static let amber = Color(red: 0.80, green: 0.60, blue: 0.34)
+    static let plum = Color(red: 0.55, green: 0.42, blue: 0.64)
+
+    /// Softens any system color into the app's palette.
+    static func muted(_ color: Color) -> Color { color.mix(with: Color(white: 0.45), by: 0.38) }
 }
 
-/// The main action on a screen, drawn like Apple TV's Play button: solid black in light
-/// mode, solid white in dark mode. No color needed to stand out.
+/// The main action on a screen: a solid sapphire capsule with a soft sheen.
 struct PrimaryCapsuleButtonStyle: ButtonStyle {
     var height: CGFloat = 32
     @Environment(\.isEnabled) private var isEnabled
@@ -22,10 +30,16 @@ struct PrimaryCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+            .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .frame(height: height)
-            .background(Capsule().fill(Color.primary.opacity(isEnabled ? (configuration.isPressed ? 0.75 : 0.92) : 0.25)))
+            .background(
+                Capsule().fill(Color.accentColor.gradient)
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+                    .brightness(configuration.isPressed ? -0.08 : 0)
+                    .opacity(isEnabled ? 1 : 0.4)
+            )
+            .shadow(color: Color.accentColor.opacity(isEnabled ? 0.3 : 0), radius: 6, y: 2)
             .contentShape(Capsule())
             .animation(.smooth(duration: 0.15), value: configuration.isPressed)
     }
@@ -46,9 +60,9 @@ struct AppGlyph: View {
                                         Color(red: 0.07, green: 0.07, blue: 0.10)],
                                startPoint: .top, endPoint: .bottom)
             )
-            // A soft light glowing up from behind the play mark.
+            // A whisper of sapphire glowing up from behind the play mark.
             tile.fill(
-                RadialGradient(colors: [.white.opacity(0.14), .clear],
+                RadialGradient(colors: [Brand.slate.opacity(0.35), .clear],
                                center: .center, startRadius: 0, endRadius: size * 0.51)
             )
             tile.fill(
@@ -76,14 +90,14 @@ struct AppGlyph: View {
     }
 }
 
-/// A whisper of light at the top of the window.
+/// A faint sapphire glow at the top of the window.
 struct WindowBackdrop: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        // Barely-there light from above, so the page has depth without any color.
-        LinearGradient(colors: [Color.white.opacity(scheme == .dark ? 0.035 : 0.0), .clear],
-                       startPoint: .top, endPoint: .center)
+        // A faint sapphire light from above, so the page has depth and a hint of color.
+        RadialGradient(colors: [Brand.slate.opacity(scheme == .dark ? 0.16 : 0.08), .clear],
+                       center: .top, startRadius: 0, endRadius: 620)
             .ignoresSafeArea()
             .allowsHitTesting(false)
     }
@@ -175,10 +189,9 @@ struct IconTile: View {
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(
-                // One graphite finish everywhere (like System Settings' gray icons); `color`
-                // is kept so callers can say what a row is about without painting it.
+                // Each feature keeps its color, softened into the app's muted palette.
                 RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-                    .fill(LinearGradient(colors: [Color(white: 0.50), Color(white: 0.30)],
+                    .fill(LinearGradient(colors: [Brand.muted(color), Brand.muted(color).mix(with: .black, by: 0.18)],
                                          startPoint: .top, endPoint: .bottom))
             )
             .accessibilityHidden(true)

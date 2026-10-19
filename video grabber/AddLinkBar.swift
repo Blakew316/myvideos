@@ -37,7 +37,7 @@ struct AddLinkField: View {
                 } else {
                     Image(systemName: "link")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(focused ? .primary : .secondary)
+                        .foregroundStyle(focused ? Color.accentColor : .secondary)
                 }
             }
             .frame(width: 22)
@@ -71,7 +71,8 @@ struct AddLinkField: View {
         .frame(maxWidth: 680)
         .glassEffect(.regular.interactive(), in: Capsule())
         .overlay(
-            Capsule().strokeBorder(Color.primary.opacity(focused ? 0.28 : hovering ? 0.14 : 0.08), lineWidth: 1)
+            Capsule().strokeBorder(focused ? Color.accentColor.opacity(0.65) : Color.primary.opacity(hovering ? 0.14 : 0.08),
+                                   lineWidth: focused ? 1.5 : 1)
         )
         .shadow(color: .black.opacity(focused ? 0.14 : 0.07), radius: focused ? 18 : 10, y: 4)
         .onHover { hovering = $0 }
@@ -239,7 +240,7 @@ struct AddCard: View {
                         if let existing = model.existingDownload(link: model.trimmedURL, info: info) {
                             Label("In Your Library", systemImage: "checkmark.circle.fill")
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Brand.sage)
                                 .help("Downloaded \(existing.date.formatted(date: .abbreviated, time: .shortened))")
                         }
                         if let link = model.subscribableLink, !model.subscriptions.contains(url: link) {

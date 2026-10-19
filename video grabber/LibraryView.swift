@@ -371,7 +371,7 @@ struct LibraryCard: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.85), lineWidth: isSelected ? 3 : 0)
+                        .strokeBorder(Color.accentColor, lineWidth: isSelected ? 3 : 0)
                 }
                 .shadow(color: .black.opacity(hovering ? 0.22 : 0.10), radius: hovering ? 16 : 6, y: hovering ? 8 : 3)
                 .scaleEffect(hovering ? 1.015 : 1)
@@ -563,7 +563,7 @@ private struct EmptyLibrary: View {
                 Image(systemName: "play.rectangle.on.rectangle.fill")
                     .font(.system(size: 54, weight: .regular))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.accentColor)
                     .padding(.bottom, 8)
                 Text("Save anything you watch or hear.")
                     .font(.system(size: 30, weight: .bold))
@@ -732,15 +732,15 @@ struct QuickActions: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: 14) {
             ShortcutTile(title: "Follow a Channel", subtitle: "New uploads save themselves",
-                         symbol: "person.crop.circle.badge.plus") {
+                         symbol: "person.crop.circle.badge.plus", tint: Brand.rose) {
                 model.subscribeRequest = .init(link: "")
             }
             ShortcutTile(title: "Convert a File", subtitle: "MP3, smaller video or GIF",
-                         symbol: "arrow.triangle.2.circlepath") {
+                         symbol: "arrow.triangle.2.circlepath", tint: Brand.amber) {
                 model.selection = .convert
             }
             ShortcutTile(title: "Use on iPhone", subtitle: "Send links and watch",
-                         symbol: "iphone") {
+                         symbol: "iphone", tint: Brand.sage) {
                 NSApp.activate()
                 openSettings()
             }
@@ -752,6 +752,7 @@ private struct ShortcutTile: View {
     let title: String
     let subtitle: String
     let symbol: String
+    let tint: Color
     let action: () -> Void
     @State private var hovering = false
 
@@ -760,9 +761,10 @@ private struct ShortcutTile: View {
             HStack(spacing: 13) {
                 Image(systemName: symbol)
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .frame(width: 38, height: 38)
-                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(LinearGradient(colors: [tint, tint.mix(with: .black, by: 0.2)], startPoint: .top, endPoint: .bottom),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.callout.weight(.semibold))

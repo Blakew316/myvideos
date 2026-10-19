@@ -100,7 +100,7 @@ struct PlayerView: View {
                     .opacity(0.7)
                     .ignoresSafeArea()
             } else {
-                LinearGradient(colors: [Color(white: 0.22), .black], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [Brand.slate.opacity(0.5), .black], startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
             }
             VStack(spacing: 18) {
