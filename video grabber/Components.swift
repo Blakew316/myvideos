@@ -303,6 +303,7 @@ struct TimecodeField: View {
 
     var body: some View {
         TextField("0:00", text: $text)
+            .labelsHidden()
             .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.center)
             .monospacedDigit()

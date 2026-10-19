@@ -51,16 +51,24 @@ struct Snapshots {
         }
     }
 
-    @Test func screens() {
+    @Test func screens() async {
         let model = AppModel.shared
-        render("download", size: CGSize(width: 760, height: 900)) { ComposerView(model: model) }
-        render("convert", size: CGSize(width: 760, height: 700)) { ConvertView(model: model) }
-        render("subscriptions-empty", size: CGSize(width: 760, height: 500)) { SubscriptionsOverview(model: model) }
-        render("queue-empty", size: CGSize(width: 760, height: 500)) { QueueView(model: model) }
-        render("onboarding", size: CGSize(width: 580, height: 660)) { OnboardingView(model: model) }
-        render("subscribe-sheet", size: CGSize(width: 520, height: 300)) { SubscribeSheet(model: model, link: "") }
-        render("settings", size: CGSize(width: 600, height: 640)) { SettingsView() }
-        render("menubar", size: CGSize(width: 340, height: 260)) { MenuBarView() }
-        render("main-window", size: CGSize(width: 1100, height: 860)) { ContentView() }
+        await model.toolchain.refresh()
+        model.urlString = ""
+        try? await Task.sleep(for: .milliseconds(300))
+        render("download-empty", size: CGSize(width: 820, height: 760)) { ComposerView(model: model) }
+        model.urlString = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+        for _ in 0..<40 where model.previewInfo == nil { try? await Task.sleep(for: .milliseconds(500)) }
+        render("download-video", size: CGSize(width: 820, height: 900)) { ComposerView(model: model) }
+        let quality = model.prefs.quality
+        model.prefs.quality = .audio
+        render("download-audio", size: CGSize(width: 820, height: 900)) { ComposerView(model: model) }
+        render("download-options-audio", size: CGSize(width: 400, height: 560)) { DownloadOptionsPanel(model: model) }
+        model.prefs.quality = quality == .audio ? .best : quality
+        model.clipEnabled = true
+        render("download-options-video", size: CGSize(width: 400, height: 560)) { DownloadOptionsPanel(model: model) }
+        model.clipEnabled = false
+        model.prefs.quality = quality
+        model.urlString = ""
     }
 }

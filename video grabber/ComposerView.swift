@@ -2,16 +2,20 @@
 //  ComposerView.swift
 //  My Videos
 //
+//  The Download page: one calm, focused task. Paste a link, see what it is, choose
+//  Video or Audio, download. Everything else lives in Options or Settings.
+//
 
 import SwiftUI
 import AppKit
 
-/// The Download page: paste a link, see what it is, choose how to save it.
 struct ComposerView: View {
     @Bindable var model: AppModel
     @Bindable private var settings: Preferences
     @FocusState private var urlFocused: Bool
+    @State private var showOptions = false
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("lastVideoQuality") private var lastVideoQuality = DownloadQuality.best.rawValue
 
     init(model: AppModel) {
         self.model = model
@@ -20,143 +24,423 @@ struct ComposerView: View {
 
     private var prefs: Preferences { model.prefs }
     private var toolchain: Toolchain { model.toolchain }
+    private var hasLink: Bool { !model.trimmedURL.isEmpty }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                header
-                linkBar
-                banners
-                if model.displayedPreview != .empty {
-                    PreviewCard(state: model.displayedPreview, isAudio: prefs.quality == .audio,
-                                subscribeLink: subscribeLink) { link in
-                        model.subscribeRequest = .init(link: link)
-                    }
-                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            VStack(spacing: 0) {
+                notice
+                if hasLink {
+                    linkStage
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else {
+                    emptyStage
+                        .transition(.opacity)
                 }
-                formatCard
-                if model.linkHasPlaylist { playlistCard }
-                if model.clipDuration != nil && !model.downloadPlaylist { clipCard }
-                if prefs.quality == .audio { musicCard }
-                saveCard
             }
-            .frame(maxWidth: 640)
-            .padding(.horizontal, 32)
-            .padding(.top, 12)
-            .padding(.bottom, 32)
+            .frame(maxWidth: 580)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 32)
             .frame(maxWidth: .infinity)
+            .containerRelativeFrame(.vertical, alignment: hasLink ? .top : .center) { length, _ in length }
         }
+        .scrollBounceBehavior(.basedOnSize)
         .background(WindowBackdrop())
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let job = model.activeJob {
-                NowDownloadingBar(job: job) { model.selection = .queue }
+                NowDownloadingBar(job: job, remaining: model.pendingCount) { model.selection = .queue }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .animation(.smooth(duration: 0.35), value: hasLink)
         .animation(.smooth(duration: 0.3), value: model.displayedPreview)
-        .animation(.smooth(duration: 0.3), value: prefs.quality)
-        .animation(.smooth(duration: 0.3), value: model.linkHasPlaylist)
-        .animation(.smooth(duration: 0.3), value: model.downloadPlaylist)
-        .animation(.smooth(duration: 0.3), value: model.clipEnabled)
-        .animation(.smooth(duration: 0.3), value: model.clipboardHasLink)
-        .animation(.smooth(duration: 0.3), value: toolchain.updateAvailable)
+        .animation(.smooth(duration: 0.25), value: prefs.quality)
         .animation(.smooth(duration: 0.3), value: model.activeJob?.id)
         .onAppear { urlFocused = true }
         .onChange(of: model.focusRequest) { urlFocused = true }
         .navigationTitle("Download")
     }
 
-    /// Offer "Subscribe" for channels and playlists that aren't followed yet.
-    private var subscribeLink: String? {
-        guard let link = model.subscribableLink, !model.subscriptions.contains(url: link) else { return nil }
-        return link
-    }
+    // MARK: - Empty state
 
-    // MARK: - Header & link
-
-    private var header: some View {
-        VStack(spacing: 10) {
-            AppGlyph(size: 60)
-            VStack(spacing: 3) {
+    private var emptyStage: some View {
+        VStack(spacing: 30) {
+            VStack(spacing: 12) {
+                AppGlyph(size: 76)
+                    .padding(.bottom, 4)
                 Text("My Videos")
-                    .font(.system(size: 28, weight: .bold))
-                    .tracking(-0.3)
-                Text("Save videos and music from across the web.")
+                    .font(.system(size: 34, weight: .bold))
+                    .tracking(-0.4)
+                Text("Paste a link to save a video or a song.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
+            }
+
+            if toolchain.hasChecked && !toolchain.isReady {
+                setupPrompt
+            } else {
+                VStack(spacing: 14) {
+                    linkField(large: true)
+                    if model.clipboardHasLink {
+                        HStack(spacing: 10) {
+                            Text("You copied a link.")
+                                .foregroundStyle(.secondary)
+                            PasteButton(payloadType: String.self) { strings in
+                                model.paste(strings.first)
+                            }
+                            .buttonBorderShape(.capsule)
+                        }
+                        .font(.callout)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    }
+                }
+            }
+
+            if !model.history.items.isEmpty {
+                recentStrip
+                    .padding(.top, 18)
+            }
+
+            footer
+        }
+        .animation(.smooth(duration: 0.25), value: model.clipboardHasLink)
+    }
+
+    private var setupPrompt: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 30))
+                .foregroundStyle(.orange)
+            Text("One more step")
+                .font(.headline)
+            Text("My Videos needs \(toolchain.missingTools.joined(separator: " and ")) to download.")
+                .foregroundStyle(.secondary)
+            Button("Finish Setup…") { model.showOnboarding = true }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20, style: .continuous))
+    }
+
+    private var recentStrip: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Recently Downloaded")
+                    .font(.headline)
+                Spacer()
+                Button("Show All") { model.selection = .history }
+                    .buttonStyle(.link)
+                    .font(.callout)
+            }
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(model.history.items.prefix(4)) { item in
+                    RecentTile(item: item) { open(item) }
+                }
+                ForEach(0..<max(0, 4 - model.history.items.prefix(4).count), id: \.self) { _ in
+                    Color.clear.frame(maxWidth: .infinity)
+                }
             }
         }
-        .padding(.top, 8)
     }
 
-    private var linkBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: "link")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
-                TextField("Paste a video or playlist link", text: $model.urlString)
-                    .textFieldStyle(.plain)
-                    .font(.title3)
-                    .autocorrectionDisabled()
-                    .focused($urlFocused)
-                    .onSubmit { if model.isValidURL { model.downloadFromComposer() } }
-                    .accessibilityLabel("Video link")
-                if model.preview == .loading {
-                    ProgressView().controlSize(.small)
+    private func open(_ item: HistoryItem) {
+        let files = item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard let file = files.first else {
+            model.selection = .history
+            return
+        }
+        model.markPlayed([file])
+        if MediaPlayer.canPlay(file) { openWindow(value: file) } else { NSWorkspace.shared.open(file) }
+    }
+
+    // MARK: - With a link
+
+    private var linkStage: some View {
+        VStack(spacing: 26) {
+            linkField(large: false)
+            hero
+            controls
+            footer
+                .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var hero: some View {
+        switch model.displayedPreview {
+        case .loading, .empty:
+            VStack(spacing: 16) {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .frame(maxWidth: 440)
+                    .overlay { ProgressView() }
+                VStack(spacing: 6) {
+                    Text("Loading the title of this video")
+                        .font(.title2.weight(.semibold))
+                    Text("Channel name · 0:00")
+                        .foregroundStyle(.secondary)
                 }
-                if !model.urlString.isEmpty {
-                    Button {
-                        model.urlString = ""
-                        urlFocused = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                .redacted(reason: .placeholder)
+            }
+        case .loaded(let info):
+            VStack(spacing: 16) {
+                Thumbnail(url: info.thumbnailURL, isAudio: prefs.quality == .audio, cornerRadius: 16)
+                    .frame(maxWidth: 440)
+                    .overlay(alignment: .bottomTrailing) {
+                        if let duration = info.duration, !info.isPlaylist {
+                            Text(Timecode.string(duration))
+                                .font(.callout.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(.black.opacity(0.6), in: Capsule())
+                                .padding(10)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help("Clear")
-                    .accessibilityLabel("Clear link")
-                } else {
-                    PasteButton(payloadType: String.self) { strings in
-                        model.paste(strings.first)
+                    .overlay(alignment: .topLeading) {
+                        if info.isPlaylist {
+                            Label("Playlist · \(info.playlistCount ?? 0) videos", systemImage: "list.bullet")
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(.black.opacity(0.6), in: Capsule())
+                                .padding(10)
+                        }
                     }
-                    .labelStyle(.iconOnly)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.small)
-                    .help("Paste Link")
+                    .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
+
+                VStack(spacing: 6) {
+                    Text(info.title)
+                        .font(.title2.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                    HStack(spacing: 8) {
+                        Text(heroSubtitle(info))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if let link = model.subscribableLink, !model.subscriptions.contains(url: link) {
+                            Button {
+                                model.subscribeRequest = .init(link: link)
+                            } label: {
+                                Label("Follow", systemImage: "plus")
+                                    .font(.callout.weight(.medium))
+                            }
+                            .buttonStyle(.glass)
+                            .controlSize(.small)
+                            .help("Download new uploads from \(info.uploader ?? "this channel") automatically")
+                        }
+                    }
+                    if let existing = model.existingDownload(link: model.trimmedURL, info: info) {
+                        duplicateNote(existing)
+                            .padding(.top, 2)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(height: 46)
-            .glassEffect(.regular.interactive(), in: .capsule)
-            .overlay(
-                Capsule().strokeBorder(Color.accentColor.opacity(urlFocused ? 0.55 : 0), lineWidth: 1.5)
-            )
-            .animation(.smooth(duration: 0.2), value: urlFocused)
+        case .failed(let message):
+            VStack(spacing: 10) {
+                Image(systemName: "questionmark.video")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundStyle(.tertiary)
+                Text("No Preview")
+                    .font(.title3.weight(.semibold))
+                Text("\(message) You can still try to download it.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 36)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.primary.opacity(0.04)))
+        }
+    }
+
+    private func heroSubtitle(_ info: MediaInfo) -> String {
+        [info.uploader, info.site == "Youtube" ? "YouTube" : info.site].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func duplicateNote(_ item: HistoryItem) -> some View {
+        let files = item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+        return HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("Downloaded \(item.date.formatted(date: .abbreviated, time: .omitted))")
+                .foregroundStyle(.secondary)
+            if !files.isEmpty {
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }
+                    .buttonStyle(.link)
+            }
+        }
+        .font(.callout)
+    }
+
+    // MARK: - Choices & download
+
+    private enum Kind: Hashable { case video, audio }
+
+    private var kind: Binding<Kind> {
+        Binding {
+            prefs.quality == .audio ? .audio : .video
+        } set: { newValue in
+            if newValue == .audio {
+                if prefs.quality != .audio { lastVideoQuality = prefs.quality.rawValue }
+                settings.quality = .audio
+            } else {
+                settings.quality = DownloadQuality(rawValue: lastVideoQuality).flatMap { $0 == .audio ? nil : $0 } ?? .best
+            }
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 18) {
+            Picker("Format", selection: kind) {
+                Label("Video", systemImage: "film").tag(Kind.video)
+                Label("Audio", systemImage: "music.note").tag(Kind.audio)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            .frame(width: 300)
+
+            HStack(spacing: 8) {
+                Text(summary)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Button {
+                    showOptions.toggle()
+                } label: {
+                    Label("Options", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.glass)
+                .popover(isPresented: $showOptions, arrowEdge: .bottom) {
+                    DownloadOptionsPanel(model: model)
+                }
+            }
+            .font(.callout)
 
             Button {
                 model.downloadFromComposer()
             } label: {
-                Label(model.activeJob == nil ? "Download" : "Add to Queue",
-                      systemImage: model.activeJob == nil ? "arrow.down" : "text.badge.plus")
-                    .font(.body.weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .frame(height: 30)
+                Text(model.activeJob == nil ? "Download" : "Add to Queue")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 240, height: 36)
             }
             .buttonStyle(.glassProminent)
-            .controlSize(.large)
+            .controlSize(.extraLarge)
             .keyboardShortcut(.defaultAction)
             .disabled(!model.isValidURL || !toolchain.isReady)
         }
     }
 
-    // MARK: - Banners
+    /// One line describing what will happen, e.g. "1080p · Subtitles · Clip 0:30–1:10".
+    private var summary: String {
+        var parts: [String] = []
+        if prefs.quality == .audio {
+            parts.append(prefs.audioFormat.displayName)
+            if prefs.addToMusic && prefs.audioFormat.worksWithAppleMusic { parts.append("Adds to Apple Music") }
+            if prefs.fetchLyrics && prefs.audioFormat.supportsArtwork { parts.append("Lyrics") }
+        } else {
+            parts.append(prefs.quality.displayName)
+            if prefs.subtitles != .off { parts.append("\(prefs.subtitleLanguage.displayName) Subtitles") }
+            if prefs.sponsorBlock == .remove { parts.append("No Sponsors") }
+        }
+        if model.downloadPlaylist {
+            parts.append(model.playlistLimit > 0 ? "First \(model.playlistLimit)" : "Whole Playlist")
+        }
+        if model.clipEnabled {
+            parts.append("Clip \(Timecode.string(model.clipStart))–\(Timecode.string(model.clipEnd))")
+        }
+        return parts.joined(separator: " · ")
+    }
 
+    // MARK: - Link field
+
+    private func linkField(large: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "link")
+                .font(.system(size: large ? 16 : 14, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField("Paste a video or playlist link", text: $model.urlString)
+                .textFieldStyle(.plain)
+                .font(large ? .title2 : .title3)
+                .autocorrectionDisabled()
+                .focused($urlFocused)
+                .onSubmit { if model.isValidURL { model.downloadFromComposer() } }
+                .accessibilityLabel("Video link")
+            if model.preview == .loading {
+                ProgressView().controlSize(.small)
+            }
+            if hasLink {
+                Button {
+                    model.urlString = ""
+                    urlFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear")
+                .accessibilityLabel("Clear link")
+            } else {
+                PasteButton(payloadType: String.self) { strings in
+                    model.paste(strings.first)
+                }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.circle)
+                .controlSize(.small)
+                .help("Paste Link")
+            }
+        }
+        .padding(.horizontal, large ? 20 : 16)
+        .frame(height: large ? 58 : 46)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .overlay(
+            Capsule().strokeBorder(Color.accentColor.opacity(urlFocused ? 0.5 : 0), lineWidth: 1.5)
+        )
+        .animation(.smooth(duration: 0.2), value: urlFocused)
+    }
+
+    // MARK: - Footer & notices
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: prefs.destination.path))
+                .resizable()
+                .frame(width: 14, height: 14)
+            Text("Saves to \(FileManager.default.displayName(atPath: prefs.destination.path))")
+            Text("·").foregroundStyle(.tertiary)
+            Text(signInSummary)
+                .foregroundStyle(signInNeedsAttention ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            SettingsLink { Text("Change").foregroundStyle(.tint) }
+                .buttonStyle(.plain)
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+
+    private var signInNeedsAttention: Bool {
+        if case .problem = model.signIn.state { return prefs.cookieSource != .none }
+        return false
+    }
+
+    private var signInSummary: String {
+        if signInNeedsAttention { return "Sign-in needs attention" }
+        switch prefs.cookieSource {
+        case .none: return "No sign-in"
+        case .builtIn: return "Signed in with My Videos"
+        case .browser: return "Signed in with \(prefs.cookieBrowser.displayName)"
+        case .file: return "Using cookies.txt"
+        }
+    }
+
+    /// At most one notice at a time, most important first.
     @ViewBuilder
-    private var banners: some View {
+    private var notice: some View {
         if Diagnostics.shared.hasNewCrash {
             NoticeBanner(systemImage: "exclamationmark.bubble.fill", tint: .orange,
                          title: "My Videos Quit Unexpectedly",
-                         message: "A report was saved on this Mac. Sharing it helps fix the problem.") {
+                         message: "A report was saved on this Mac.") {
                 HStack(spacing: 8) {
                     Button("Dismiss") { Diagnostics.shared.markSeen() }
                         .buttonStyle(.glass)
@@ -168,423 +452,221 @@ struct ComposerView: View {
                     .tint(.orange)
                 }
             }
-        }
-        if toolchain.hasChecked && !toolchain.isReady {
-            NoticeBanner(systemImage: "wrench.and.screwdriver.fill", tint: .orange,
-                         title: "Finish Setting Up",
-                         message: "My Videos needs \(toolchain.missingTools.joined(separator: " and ")) to download.") {
-                Button("Set Up…") { model.showOnboarding = true }
-                    .buttonStyle(.glassProminent)
-                    .tint(.orange)
-            }
+            .padding(.bottom, 24)
         } else if toolchain.updateAvailable {
             NoticeBanner(systemImage: "arrow.down.app.fill", tint: .blue,
-                         title: "Update Available",
-                         message: "yt-dlp \(toolchain.latestYtdlpVersion ?? "") keeps downloads working as sites change.") {
+                         title: "yt-dlp \(toolchain.latestYtdlpVersion ?? "") Is Available",
+                         message: "Updating keeps downloads working as sites change.") {
                 if toolchain.operation == .updating {
                     ProgressView().controlSize(.small)
                 } else {
-                    Button("Update") {
-                        Task { await toolchain.updateYtdlp(log: model.log) }
-                    }
-                    .buttonStyle(.glassProminent)
-                }
-            }
-        }
-
-        if model.isValidURL, let existing = model.existingDownload(link: model.trimmedURL, info: model.previewInfo) {
-            let files = existing.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
-            NoticeBanner(systemImage: "checkmark.circle.fill", tint: .green,
-                         title: "You’ve Downloaded This Before",
-                         message: files.isEmpty
-                             ? "On \(existing.date.formatted(date: .abbreviated, time: .omitted)) — the file has since been moved or deleted."
-                             : "On \(existing.date.formatted(date: .abbreviated, time: .omitted)). You can download it again anyway.") {
-                if let file = files.first {
-                    HStack(spacing: 8) {
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }
-                            .buttonStyle(.glass)
-                        Button("Open") {
-                            model.markPlayed([file])
-                            if MediaPlayer.canPlay(file) { openWindow(value: file) } else { NSWorkspace.shared.open(file) }
-                        }
+                    Button("Update") { Task { await toolchain.updateYtdlp(log: model.log) } }
                         .buttonStyle(.glassProminent)
-                    }
                 }
             }
-        }
-
-        if model.clipboardHasLink && model.urlString.isEmpty {
-            NoticeBanner(systemImage: "doc.on.clipboard.fill", tint: .accentColor,
-                         title: "You Copied a Link",
-                         message: "Download it with My Videos?") {
-                HStack(spacing: 8) {
-                    Button("Not Now") { model.dismissClipboardSuggestion() }
-                        .buttonStyle(.glass)
-                    PasteButton(payloadType: String.self) { strings in
-                        model.paste(strings.first)
-                    }
-                    .buttonBorderShape(.capsule)
-                }
-            }
+            .padding(.bottom, 24)
         }
     }
+}
 
-    // MARK: - Cards
+// MARK: - Options panel
 
-    private var formatCard: some View {
-        FormCard(title: "Format") {
-            FormRow(title: "Quality", systemImage: "sparkles.tv", color: .purple) {
-                Picker("Quality", selection: $settings.quality) {
-                    ForEach(DownloadQuality.allCases) { q in
-                        Label(q.rawValue, systemImage: q.symbol).tag(q)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
+/// Everything beyond Video/Audio, in one tidy popover.
+struct DownloadOptionsPanel: View {
+    @Bindable var model: AppModel
+    @Bindable private var settings: Preferences
+
+    init(model: AppModel) {
+        self.model = model
+        self.settings = model.prefs
+    }
+
+    private var prefs: Preferences { model.prefs }
+
+    var body: some View {
+        Form {
             if prefs.quality == .audio {
-                FormRow(title: "Audio Format", systemImage: "waveform", color: .pink,
-                        detail: prefs.audioFormat == .opus ? "Opus files can’t be added to Apple Music." : nil) {
-                    Picker("Audio Format", selection: $settings.audioFormat) {
+                Section("Audio") {
+                    Picker("Format", selection: $settings.audioFormat) {
                         ForEach(AudioFormat.allCases) { Text($0.displayName).tag($0) }
                     }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                FormRow(title: "Bitrate", systemImage: "dial.medium", color: .orange) {
-                    Picker("Bitrate", selection: $settings.audioBitrate) {
+                    Picker("Quality", selection: $settings.audioBitrate) {
                         ForEach(AudioBitrate.allCases) { Text($0.displayName).tag($0) }
                     }
-                    .labelsHidden()
-                    .fixedSize()
                     .disabled(prefs.audioFormat == .wav)
+                    Toggle("Even out volume", isOn: $settings.normalizeVolume)
+                    Toggle("Find lyrics", isOn: $settings.fetchLyrics)
+                        .disabled(!prefs.audioFormat.supportsArtwork)
+                }
+                Section {
+                    Toggle("Add to Apple Music", isOn: $settings.addToMusic)
+                        .disabled(!prefs.audioFormat.worksWithAppleMusic)
+                    if prefs.addToMusic && prefs.audioFormat.worksWithAppleMusic {
+                        if !model.downloadPlaylist {
+                            TextField("Title", text: $model.tags.title, prompt: Text("Song title"))
+                            TextField("Artist", text: $model.tags.artist, prompt: Text("Artist"))
+                        }
+                        TextField("Album", text: $model.tags.album, prompt: Text("Optional"))
+                    }
+                } header: {
+                    Text("Apple Music")
+                } footer: {
+                    if !prefs.audioFormat.worksWithAppleMusic {
+                        Text("Apple Music can’t play Opus files.").foregroundStyle(.secondary)
+                    }
                 }
             } else {
-                FormRow(title: "Subtitles", systemImage: "captions.bubble.fill", color: .teal,
-                        detail: prefs.subtitles == .off ? nil : "Uses an automatic translation when there’s none in your language.") {
-                    HStack(spacing: 8) {
-                        if prefs.subtitles != .off {
-                            Picker("Language", selection: $settings.subtitleLanguage) {
-                                ForEach(SubtitleLanguage.allCases) { Text($0.displayName).tag($0) }
+                Section("Video") {
+                    Picker("Quality", selection: $settings.quality) {
+                        ForEach(DownloadQuality.allCases.filter { $0 != .audio }) { Text($0.displayName).tag($0) }
+                    }
+                    Picker("Subtitles", selection: $settings.subtitles) {
+                        ForEach(SubtitleMode.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    if prefs.subtitles != .off {
+                        Picker("Language", selection: $settings.subtitleLanguage) {
+                            ForEach(SubtitleLanguage.allCases) { Text($0.displayName).tag($0) }
+                        }
+                    }
+                    Picker("Sponsored segments", selection: $settings.sponsorBlock) {
+                        ForEach(SponsorBlockMode.allCases) { Text($0.displayName).tag($0) }
+                    }
+                }
+            }
+
+            if model.linkHasPlaylist {
+                Section("Playlist") {
+                    Toggle("Download the whole playlist", isOn: $model.downloadPlaylist)
+                    if model.downloadPlaylist {
+                        Picker("Videos", selection: $model.playlistLimit) {
+                            Text("All").tag(0)
+                            ForEach([5, 10, 25, 50, 100], id: \.self) { Text("First \($0)").tag($0) }
+                        }
+                    }
+                }
+            }
+
+            if let duration = model.clipDuration, !model.downloadPlaylist {
+                Section {
+                    Toggle("Download only part", isOn: $model.clipEnabled)
+                    if model.clipEnabled {
+                        VStack(spacing: 10) {
+                            RangeSlider(lower: $model.clipStart, upper: $model.clipEnd, bounds: 0...duration)
+                            HStack {
+                                TimecodeField(seconds: $model.clipStart, range: 0...max(model.clipEnd - 1, 0))
+                                Spacer()
+                                Text("\(Timecode.string(model.clipEnd - model.clipStart)) selected")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                                Spacer()
+                                TimecodeField(seconds: $model.clipEnd, range: min(model.clipStart + 1, duration)...duration)
                             }
-                            .labelsHidden()
-                            .fixedSize()
                         }
-                        Picker("Subtitles", selection: $settings.subtitles) {
-                            ForEach(SubtitleMode.allCases) { Text($0.displayName).tag($0) }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
+                        .padding(.vertical, 4)
                     }
-                }
-                if isYouTubeLink {
-                    FormRow(title: "Sponsored Segments", systemImage: "forward.end.fill", color: .green,
-                            detail: prefs.sponsorBlock == .off ? "Powered by the SponsorBlock community." : nil) {
-                        Picker("Sponsored Segments", selection: $settings.sponsorBlock) {
-                            ForEach(SponsorBlockMode.allCases) { Text($0.displayName).tag($0) }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
+                } header: {
+                    Text("Clip")
                 }
             }
-            FormRow(title: "Cover Art & Details", systemImage: "photo.fill", color: .indigo,
-                    detail: "Adds the thumbnail, title and channel to the file.") {
-                Toggle("Cover Art & Details", isOn: $settings.embedArtwork)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
+
+            Section {
+                Toggle("Cover art and details", isOn: $settings.embedArtwork)
+            } footer: {
+                Text("These choices are remembered for your next download.")
+                    .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private var isYouTubeLink: Bool {
-        guard let host = URL(string: model.trimmedURL)?.host?.lowercased() else { return true }
-        return host.hasSuffix("youtube.com") || host == "youtu.be"
-    }
-
-    private var playlistCard: some View {
-        FormCard(title: "Playlist") {
-            FormRow(title: "Download Entire Playlist", systemImage: "list.and.film", color: .red,
-                    detail: playlistDetail) {
-                Toggle("Download Entire Playlist", isOn: $model.downloadPlaylist)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            if model.downloadPlaylist {
-                FormRow(title: "Limit", systemImage: "number", color: .gray) {
-                    Picker("Limit", selection: $model.playlistLimit) {
-                        Text("All Videos").tag(0)
-                        ForEach([5, 10, 25, 50, 100], id: \.self) { Text("First \($0)").tag($0) }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-            }
-        }
-    }
-
-    private var playlistDetail: String {
-        if case .loaded(let info) = model.displayedPreview, info.isPlaylist, let count = info.playlistCount {
-            return "\(info.title) · \(count) video\(count == 1 ? "" : "s")"
-        }
-        return "Saves into a folder named after the playlist."
-    }
-
-    private var clipCard: some View {
-        let duration = model.clipDuration ?? 1
-        return FormCard(title: "Clip",
-                        footer: model.clipEnabled ? "Only the selected part is downloaded — \(Timecode.string(model.clipEnd - model.clipStart)) in total." : nil) {
-            FormRow(title: "Download Only Part", systemImage: "scissors", color: .yellow) {
-                Toggle("Download Only Part", isOn: $model.clipEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            if model.clipEnabled {
-                VStack(spacing: 12) {
-                    RangeSlider(lower: $model.clipStart, upper: $model.clipEnd, bounds: 0...duration)
-                    HStack {
-                        TimecodeField(seconds: $model.clipStart, range: 0...max(model.clipEnd - 1, 0))
-                        Spacer()
-                        Text(Timecode.string(duration))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .monospacedDigit()
-                        Spacer()
-                        TimecodeField(seconds: $model.clipEnd, range: min(model.clipStart + 1, duration)...duration)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-        }
-    }
-
-    private var musicCard: some View {
-        FormCard(title: "Apple Music",
-                 footer: model.downloadPlaylist ? "The playlist becomes an album, with each song numbered in order." : nil) {
-            FormRow(title: "Even Out Volume", systemImage: "speaker.wave.2.fill", color: .teal,
-                    detail: "So every song plays at the same loudness.") {
-                Toggle("Even Out Volume", isOn: $settings.normalizeVolume)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            FormRow(title: "Find Lyrics", systemImage: "quote.bubble.fill", color: .indigo,
-                    detail: "Adds lyrics to the song when they’re available.") {
-                Toggle("Find Lyrics", isOn: $settings.fetchLyrics)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .disabled(prefs.audioFormat == .wav || prefs.audioFormat == .opus)
-            }
-            FormRow(title: "Add to Apple Music", systemImage: "music.note", color: .pink,
-                    detail: prefs.audioFormat.worksWithAppleMusic ? nil : "Not available for Opus.") {
-                Toggle("Add to Apple Music", isOn: $settings.addToMusic)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .disabled(!prefs.audioFormat.worksWithAppleMusic)
-            }
-            if prefs.addToMusic && prefs.audioFormat.worksWithAppleMusic {
-                if !model.downloadPlaylist {
-                    tagRow("Title", "music.quarternote.3", .red, text: $model.tags.title, prompt: "Song title")
-                    tagRow("Artist", "music.mic", .orange, text: $model.tags.artist, prompt: "Artist")
-                }
-                tagRow("Album", "square.stack.fill", .purple, text: $model.tags.album, prompt: "Optional")
-            }
-        }
-    }
-
-    private func tagRow(_ title: String, _ icon: String, _ color: Color,
-                        text: Binding<String>, prompt: String) -> some View {
-        FormRow(title: title, systemImage: icon, color: color) {
-            TextField(title, text: text, prompt: Text(prompt))
-                .textFieldStyle(.plain)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 300)
-        }
-    }
-
-    private var saveCard: some View {
-        FormCard(title: "Save") {
-            FormRow(title: "Save To", systemImage: "folder.fill", color: .blue) {
-                HStack(spacing: 8) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: prefs.destination.path))
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                    Text(FileManager.default.displayName(atPath: prefs.destination.path))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(.secondary)
-                        .help(prefs.destination.path)
-                    Button("Choose…", action: chooseFolder)
-                }
-            }
-            SignInControls(model: model, compact: true)
-        }
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Choose"
-        panel.directoryURL = prefs.destination
-        if panel.runModal() == .OK, let url = panel.url {
-            settings.destination = url
-        }
+        .formStyle(.grouped)
+        .frame(width: 400)
+        .frame(minHeight: 260, maxHeight: 560)
     }
 }
 
-// MARK: - Preview card
+// MARK: - Pieces
 
-struct PreviewCard: View {
-    let state: AppModel.PreviewState
-    let isAudio: Bool
-    var subscribeLink: String?
-    var subscribe: (String) -> Void = { _ in }
+private struct RecentTile: View {
+    let item: HistoryItem
+    let action: () -> Void
+    @State private var hovering = false
+
+    private var available: Bool { item.fileURLs.contains { FileManager.default.fileExists(atPath: $0.path) } }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            Group {
-                if case .loaded(let info) = state {
-                    Thumbnail(url: info.thumbnailURL, isAudio: isAudio, cornerRadius: 10)
-                        .overlay(alignment: .bottomTrailing) { durationBadge(info) }
-                } else {
-                    Thumbnail(url: nil, isAudio: isAudio, cornerRadius: 10)
-                }
-            }
-            .frame(width: 168)
-
-            VStack(alignment: .leading, spacing: 6) {
-                switch state {
-                case .loading:
-                    Text("Loading the video’s title and artwork")
-                        .font(.headline)
-                        .redacted(reason: .placeholder)
-                    Text("Channel name")
-                        .redacted(reason: .placeholder)
-                    ProgressView().controlSize(.small).padding(.top, 2)
-                case .loaded(let info):
-                    Text(info.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .textSelection(.enabled)
-                    if let uploader = info.uploader {
-                        HStack(spacing: 8) {
-                            Text(uploader)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            if let subscribeLink {
-                                Button {
-                                    subscribe(subscribeLink)
-                                } label: {
-                                    Label("Subscribe", systemImage: "plus")
-                                        .font(.caption.weight(.semibold))
-                                }
-                                .buttonStyle(.glass)
-                                .controlSize(.small)
-                                .help("Download new uploads from \(uploader) automatically")
-                            }
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 7) {
+                Thumbnail(url: item.thumbnailURL, isAudio: item.isAudio, cornerRadius: 10)
+                    .overlay {
+                        if hovering && available {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 38, height: 38)
+                                .background(.black.opacity(0.45), in: Circle())
+                                .transition(.opacity)
                         }
                     }
-                    HStack(spacing: 6) {
-                        if info.isPlaylist {
-                            Tag(text: "Playlist", systemImage: "list.bullet", tint: .red)
-                            if let count = info.playlistCount {
-                                Tag(text: "\(count) videos", systemImage: nil, tint: .secondary)
-                            }
-                        }
-                        if info.isLive {
-                            Tag(text: "Live", systemImage: "dot.radiowaves.left.and.right", tint: .red)
-                        }
-                        if let site = info.site {
-                            Tag(text: site, systemImage: nil, tint: .secondary)
-                        }
-                    }
-                    .padding(.top, 2)
-                case .failed(let message):
-                    Label("Preview Unavailable", systemImage: "exclamationmark.triangle.fill")
-                        .font(.headline)
-                        .foregroundStyle(.orange)
-                    Text("\(message) You can still try downloading it.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                case .empty:
-                    EmptyView()
-                }
+                    .shadow(color: .black.opacity(hovering ? 0.2 : 0.08), radius: hovering ? 10 : 4, y: hovering ? 5 : 2)
+                    .opacity(available ? 1 : 0.5)
+                Text(item.title)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
-    }
-
-    @ViewBuilder
-    private func durationBadge(_ info: MediaInfo) -> some View {
-        if let duration = info.duration, !info.isPlaylist {
-            Text(Timecode.string(duration))
-                .font(.caption2.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.white)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4))
-                .padding(6)
-        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .onHover { hovering = $0 }
+        .animation(.smooth(duration: 0.18), value: hovering)
+        .help(available ? "Play “\(item.title)”" : "This file has been moved or deleted")
     }
 }
 
-struct Tag: View {
-    let text: String
-    let systemImage: String?
-    let tint: Color
-
-    var body: some View {
-        Group {
-            if let systemImage {
-                Label(text, systemImage: systemImage)
-            } else {
-                Text(text)
-            }
-        }
-        .font(.caption.weight(.medium))
-        .foregroundStyle(tint)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(tint.opacity(0.12), in: Capsule())
-    }
-}
-
-// MARK: - Now downloading bar
-
-/// Pinned to the bottom of the Download page while something is downloading.
+/// Pinned to the bottom of the Download page while something downloads.
 struct NowDownloadingBar: View {
     let job: DownloadJob
+    var remaining = 1
     let showQueue: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Thumbnail(url: job.info?.thumbnailURL, isAudio: job.options.isAudio, cornerRadius: 5)
-                .frame(width: 56)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(job.displayTitle)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                JobProgressBar(job: job)
-                Text(job.statusLine)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .monospacedDigit()
+        Button(action: showQueue) {
+            HStack(spacing: 12) {
+                Thumbnail(url: job.info?.thumbnailURL, isAudio: job.options.isAudio, cornerRadius: 5)
+                    .frame(width: 52)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(job.displayTitle)
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                        Spacer()
+                        if remaining > 1 {
+                            Text("\(remaining) in queue")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    JobProgressBar(job: job)
+                    Text(job.statusLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .monospacedDigit()
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            Button("Show Queue", action: showQueue)
-                .buttonStyle(.glass)
+            .padding(12)
+            .contentShape(Rectangle())
         }
-        .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16, style: .continuous))
-        .frame(maxWidth: 640)
-        .padding(.horizontal, 32)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: 580)
+        .padding(.horizontal, 40)
         .padding(.bottom, 16)
+        .help("Show Queue")
     }
 }
 

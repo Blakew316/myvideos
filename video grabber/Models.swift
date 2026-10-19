@@ -16,6 +16,16 @@ nonisolated enum DownloadQuality: String, CaseIterable, Identifiable, Codable, S
 
     var id: String { rawValue }
 
+    /// Title-case name for menus and summaries (rawValue is persisted, so it stays as is).
+    var displayName: String {
+        switch self {
+        case .best:  return "Best Quality"
+        case .p1080: return "1080p"
+        case .p720:  return "720p"
+        case .audio: return "Audio Only"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .best:  return "sparkles"
