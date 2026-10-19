@@ -20,7 +20,8 @@ nonisolated enum Lyrics {
 
     /// Plain lyrics for a song, or nil when none are found.
     static func find(title: String, artist: String, duration: Double?) async -> String? {
-        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Lyrics databases list "Get Lucky", not "Get Lucky (feat. Pharrell Williams)".
+        let title = MediaInfo.withoutFeaturing(title.trimmingCharacters(in: .whitespacesAndNewlines))
         let artist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, !artist.isEmpty else { return nil }
 
@@ -76,28 +77,7 @@ nonisolated enum Lyrics {
     /// Writes lyrics into an .m4a or .mp3 in place (stream copy — no re-encoding).
     @discardableResult
     static func embed(_ lyrics: String, in file: URL, ffmpeg: URL) async -> Bool {
-        let ext = file.pathExtension.lowercased()
-        guard ext == "m4a" || ext == "mp3" else { return false }
-        let temp = file.deletingLastPathComponent()
-            .appendingPathComponent(".\(UUID().uuidString).\(ext)")
-        var args = ["-v", "error", "-y", "-i", file.path, "-map", "0:a", "-map", "0:v?", "-c", "copy"]
-        if ext == "m4a" {
-            args += ["-disposition:v", "attached_pic", "-metadata", "lyrics=\(lyrics)", "-f", "ipod"]
-        } else {
-            args += ["-id3v2_version", "3", "-metadata", "lyrics=\(lyrics)"]
-        }
-        args.append(temp.path)
-        guard let output = try? await ProcessRunner.run(ffmpeg, args), output.status == 0 else {
-            try? FileManager.default.removeItem(at: temp)
-            return false
-        }
-        do {
-            _ = try FileManager.default.replaceItemAt(file, withItemAt: temp)
-            return true
-        } catch {
-            try? FileManager.default.removeItem(at: temp)
-            return false
-        }
+        await MediaTags.write(file, tags: nil, lyrics: lyrics, ffmpeg: ffmpeg)
     }
 }
 
@@ -115,6 +95,39 @@ nonisolated enum MediaTags {
         return MusicTags(title: lower["title"] ?? file.deletingPathExtension().lastPathComponent,
                          artist: lower["artist"] ?? lower["album_artist"] ?? "",
                          album: lower["album"] ?? "")
+    }
+
+    /// Rewrites the song details (and optionally lyrics) in an .m4a or .mp3 in place —
+    /// a stream copy, so the audio and cover art are untouched.
+    @discardableResult
+    static func write(_ file: URL, tags: MusicTags?, lyrics: String?, ffmpeg: URL) async -> Bool {
+        let ext = file.pathExtension.lowercased()
+        guard ext == "m4a" || ext == "mp3" else { return false }
+        var metadata: [String] = []
+        if let tags {
+            for (key, value) in [("title", tags.title), ("artist", tags.artist), ("album", tags.album)]
+            where !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                metadata += ["-metadata", "\(key)=\(value)"]
+            }
+        }
+        if let lyrics, !lyrics.isEmpty { metadata += ["-metadata", "lyrics=\(lyrics)"] }
+        guard !metadata.isEmpty else { return false }
+
+        let temp = file.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).\(ext)")
+        var args = ["-v", "error", "-y", "-i", file.path, "-map", "0:a", "-map", "0:v?", "-c", "copy"] + metadata
+        args += ext == "m4a" ? ["-disposition:v", "attached_pic", "-f", "ipod"] : ["-id3v2_version", "3"]
+        args.append(temp.path)
+        guard let output = try? await ProcessRunner.run(ffmpeg, args), output.status == 0 else {
+            try? FileManager.default.removeItem(at: temp)
+            return false
+        }
+        do {
+            _ = try FileManager.default.replaceItemAt(file, withItemAt: temp)
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            return false
+        }
     }
 
     static func duration(_ file: URL, ffprobe: URL) async -> Double? {

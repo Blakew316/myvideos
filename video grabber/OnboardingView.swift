@@ -31,7 +31,7 @@ struct OnboardingView: View {
             Divider()
             footer
         }
-        .frame(width: 560, height: 620)
+        .frame(width: 580, height: 660)
         .background(WindowBackdrop())
         .animation(.smooth(duration: 0.35), value: step)
         .onAppear {
@@ -52,15 +52,17 @@ struct OnboardingView: View {
             }
             .padding(.top, 36)
 
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
                 feature("arrow.down.circle.fill", .blue, "Save From Almost Anywhere",
                         "Paste a link from YouTube, Vimeo and thousands of other sites — videos, songs or entire playlists.")
+                feature("dot.radiowaves.left.and.right", .red, "Follow Your Favorite Channels",
+                        "Subscribe, and new uploads download on their own.")
                 feature("music.note", .pink, "Straight Into Apple Music",
-                        "Audio arrives tagged with title, artist and cover art, ready in your library.")
-                feature("scissors", .orange, "Just the Part You Want",
-                        "Trim to a clip, add subtitles, and pick the quality before you download.")
+                        "Songs arrive with title, artist, cover art and lyrics.")
+                feature("wand.and.sparkles", .orange, "Trim, Skip and Convert",
+                        "Keep just the part you want, skip sponsor segments, or convert any file.")
                 feature("menubar.rectangle", .indigo, "Always Within Reach",
-                        "Use the menu bar, the Share menu or Services to download without opening the app.")
+                        "Use the menu bar, the Share menu, Shortcuts or Siri.")
             }
             .padding(.horizontal, 56)
             Spacer()

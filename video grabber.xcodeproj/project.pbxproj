@@ -19,6 +19,13 @@
 			remoteGlobalIDString = E1A0000000000000000000A6;
 			remoteInfo = "My Videos Share";
 		};
+		E1A0000000000000000000CB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D02C2B1F3084A630008BDC34 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D02C2B263084A630008BDC34;
+			remoteInfo = "video grabber";
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -38,6 +45,7 @@
 		D079751030859F97006C1D9F /* video-grabber-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "video-grabber-Info.plist"; sourceTree = "<group>"; };
 		E1A0000000000000000000A1 /* My Videos Share.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "My Videos Share.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1A0000000000000000000AE /* My-Videos-Share-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "My-Videos-Share-Info.plist"; sourceTree = "<group>"; };
+		E1A0000000000000000000C1 /* My Videos Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "My Videos Tests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -49,6 +57,11 @@
 		E1A0000000000000000000A2 /* My Videos Share */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "My Videos Share";
+			sourceTree = "<group>";
+		};
+		E1A0000000000000000000C2 /* My Videos Tests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "My Videos Tests";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -65,6 +78,11 @@
 			files = (
 			);
 		};
+		E1A0000000000000000000C4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -74,6 +92,7 @@
 				D079751030859F97006C1D9F /* video-grabber-Info.plist */,
 				E1A0000000000000000000AE /* My-Videos-Share-Info.plist */,
 				E1A0000000000000000000A2 /* My Videos Share */,
+				E1A0000000000000000000C2 /* My Videos Tests */,
 				D02C2B293084A630008BDC34 /* video grabber */,
 				D02C2B283084A630008BDC34 /* Products */,
 			);
@@ -84,6 +103,7 @@
 			children = (
 				D02C2B273084A630008BDC34 /* My Videos.app */,
 				E1A0000000000000000000A1 /* My Videos Share.appex */,
+				E1A0000000000000000000C1 /* My Videos Tests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -134,6 +154,27 @@
 			productReference = E1A0000000000000000000A1 /* My Videos Share.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		E1A0000000000000000000C6 /* My Videos Tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E1A0000000000000000000C7 /* Build configuration list for PBXNativeTarget "My Videos Tests" */;
+			buildPhases = (
+				E1A0000000000000000000C3 /* Sources */,
+				E1A0000000000000000000C4 /* Frameworks */,
+				E1A0000000000000000000C5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E1A0000000000000000000CA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E1A0000000000000000000C2 /* My Videos Tests */,
+			);
+			name = "My Videos Tests";
+			productName = "My Videos Tests";
+			productReference = E1A0000000000000000000C1 /* My Videos Tests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -149,6 +190,10 @@
 					};
 					E1A0000000000000000000A6 = {
 						CreatedOnToolsVersion = 27.0;
+					};
+					E1A0000000000000000000C6 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = D02C2B263084A630008BDC34;
 					};
 				};
 			};
@@ -171,6 +216,7 @@
 			targets = (
 				D02C2B263084A630008BDC34 /* video grabber */,
 				E1A0000000000000000000A6 /* My Videos Share */,
+				E1A0000000000000000000C6 /* My Videos Tests */,
 			);
 		};
 /* End PBXProject section */
@@ -182,6 +228,11 @@
 			);
 		};
 		E1A0000000000000000000A5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		E1A0000000000000000000C5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -199,6 +250,11 @@
 			files = (
 			);
 		};
+		E1A0000000000000000000C3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -206,6 +262,11 @@
 			isa = PBXTargetDependency;
 			target = E1A0000000000000000000A6 /* My Videos Share */;
 			targetProxy = E1A0000000000000000000AD /* PBXContainerItemProxy */;
+		};
+		E1A0000000000000000000CA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D02C2B263084A630008BDC34 /* video grabber */;
+			targetProxy = E1A0000000000000000000CB /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -452,6 +513,40 @@
 			};
 			name = Release;
 		};
+		E1A0000000000000000000C8 /* Debug configuration for PBXNativeTarget "My Videos Tests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D8D94SXAG6;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wholesalepayments.video-grabber.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/My Videos.app/Contents/MacOS/My Videos";
+			};
+			name = Debug;
+		};
+		E1A0000000000000000000C9 /* Release configuration for PBXNativeTarget "My Videos Tests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D8D94SXAG6;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wholesalepayments.video-grabber.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/My Videos.app/Contents/MacOS/My Videos";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -476,6 +571,14 @@
 			buildConfigurations = (
 				E1A0000000000000000000A8 /* Debug configuration for PBXNativeTarget "My Videos Share" */,
 				E1A0000000000000000000A9 /* Release configuration for PBXNativeTarget "My Videos Share" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		E1A0000000000000000000C7 /* Build configuration list for PBXNativeTarget "My Videos Tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E1A0000000000000000000C8 /* Debug configuration for PBXNativeTarget "My Videos Tests" */,
+				E1A0000000000000000000C9 /* Release configuration for PBXNativeTarget "My Videos Tests" */,
 			);
 			defaultConfigurationName = Release;
 		};

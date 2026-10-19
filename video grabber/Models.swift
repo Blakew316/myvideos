@@ -363,7 +363,26 @@ nonisolated struct MediaInfo: Codable, Sendable, Equatable {
                 .trimmingCharacters(in: .whitespaces)
         }
         tags.album = album ?? ""
+        tags.title = Self.formatFeaturing(tags.title)
         return tags
+    }
+
+    /// "Song ft. A, B" → "Song (feat. A, B)", the way Apple Music writes it.
+    static func formatFeaturing(_ title: String) -> String {
+        let pattern = #"\s+(?:ft\.?|feat\.?|featuring)\s+([^\(\)\[\]]+)$"#
+        guard let range = title.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else { return title }
+        let guests = title[range]
+            .replacingOccurrences(of: #"^\s+(?:ft\.?|feat\.?|featuring)\s+"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespaces)
+        return title[..<range.lowerBound].trimmingCharacters(in: .whitespaces) + " (feat. \(guests))"
+    }
+
+    /// "Song (feat. A)" → "Song", for looking a song up by name.
+    static func withoutFeaturing(_ title: String) -> String {
+        let pattern = #"\s*[\(\[]?\s*(?:ft\.?|feat\.?|featuring)\s.*$"#
+        let base = title.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespaces)
+        return base.isEmpty ? title : base
     }
 
     /// Strips "(Official Video)", "[Lyrics]" and friends from a title.

@@ -355,7 +355,7 @@ final class AppModel {
             if let subID = job.subscriptionID, let entryID = job.feedEntryID {
                 subscriptions.update(subID) { $0.downloadedIDs.append(entryID) }
             }
-            if job.options.isAudio && (job.options.addToMusic || job.options.fetchLyrics) {
+            if job.options.isAudio && (job.options.addToMusic || job.options.fetchLyrics || job.options.embedArtwork) {
                 Task { await finishAudio(job) }
             }
             if job.subscriptionID == nil {
@@ -481,11 +481,14 @@ final class AppModel {
                     job.musicState = .findingLyrics
                     let duration = files.count == 1 ? job.info?.duration : nil
                     lyrics = await Lyrics.find(title: tags.title, artist: tags.artist, duration: duration)
-                    if let lyrics, let ffmpeg = toolchain.ffmpeg {
-                        if await Lyrics.embed(lyrics, in: file, ffmpeg: ffmpeg) {
-                            lyricsFound += 1
-                            appendLog("Added lyrics: \(file.lastPathComponent)")
-                        }
+                }
+                // Write the tidy song details (and any lyrics) into the file itself, so it
+                // looks right in every player — not just once it's in Apple Music.
+                if let ffmpeg = toolchain.ffmpeg, job.options.embedArtwork || lyrics != nil {
+                    if await MediaTags.write(file, tags: job.options.embedArtwork ? tags : nil,
+                                             lyrics: lyrics, ffmpeg: ffmpeg), lyrics != nil {
+                        lyricsFound += 1
+                        appendLog("Added lyrics: \(file.lastPathComponent)")
                     }
                 }
                 if job.options.addToMusic {
