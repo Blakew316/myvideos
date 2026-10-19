@@ -269,7 +269,7 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
 
     /// The full yt-dlp argument list for one download.
     func arguments(url: String, ffmpegDirectory: URL?, impersonate: Bool,
-                   cookieArguments: [String], printFile: URL) -> [String] {
+                   cookieArguments: [String], printFile: URL, extraArguments: [String] = []) -> [String] {
         var args = quality.formatArguments
         if isAudio {
             args += ["-x", "--audio-format", audioFormat.rawValue, "--audio-quality", audioBitrate.rawValue]
@@ -333,6 +333,7 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
             args += ["--impersonate", "chrome"]
         }
         args += cookieArguments
+        args += extraArguments
         // "--" so a URL can never be misread as an option.
         args += ["--", LinkRewrite.forDownloader(url)]
         return args

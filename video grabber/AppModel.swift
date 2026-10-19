@@ -386,6 +386,16 @@ final class AppModel {
                 return .failed("Couldn’t run yt-dlp: \(error.localizedDescription)")
             }
         }
+        // Not a site yt-dlp knows: look for video the page publishes openly.
+        if DownloadJob.isUnsupported(firstError), let page = URL(string: url) {
+            let found = await MediaSniffer.sniff(page)
+            if Task.isCancelled { return .empty }
+            if let found {
+                if found.isProtected { return .failed("This video is copy-protected (DRM), so it can’t be downloaded.") }
+                if !found.mediaURLs.isEmpty { return .loaded(MediaSniffer.info(for: found, url: url)) }
+            }
+            return .failed("No public video was found on this page.")
+        }
         return .failed(Self.describeFetchError(firstError, url: url))
     }
 

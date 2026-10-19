@@ -91,7 +91,15 @@ final class DownloadJob: Identifiable {
         var cookieArguments: [String]
         var impersonate: Bool
         var note: String = ""
+        /// Media found on the page by MediaSniffer, downloaded instead of the page link.
+        var mediaURL: URL?
+        var pageTitle: String?
     }
+
+    /// The sign-in arguments the download started with.
+    private var initialCookies: [String] = []
+    private var sniffTried = false
+    private var sniffTask: Task<Void, Never>?
 
     /// The attempts to make, in order, for the given sign-in and impersonation settings.
     nonisolated static func plan(cookieArguments: [String], impersonate: Bool) -> [Attempt] {
@@ -150,6 +158,8 @@ final class DownloadJob: Identifiable {
         let first = attempts.removeFirst()
         fallbacks = attempts
         attemptErrors = []
+        initialCookies = cookieArguments
+        sniffTried = false
         launch(first, tool: tool)
     }
 
@@ -158,11 +168,22 @@ final class DownloadJob: Identifiable {
             .appendingPathComponent("my-videos-\(id.uuidString).txt")
         self.printFile = printFile
         impersonating = attempt.impersonate
-        let args = options.arguments(url: url,
+        var extra: [String] = []
+        if attempt.mediaURL != nil {
+            extra += ["--referer", url, "--add-header", "User-Agent:\(MediaSniffer.userAgent)"]
+            if let title = attempt.pageTitle, !title.isEmpty {
+                // Name the file after the page, not the stream ("master.m3u8"). The text before
+                // the first ":" is a template, so colons and % signs are made harmless.
+                let safe = title.replacingOccurrences(of: "%", with: "%%").replacingOccurrences(of: ":", with: " -")
+                extra += ["--parse-metadata", "\(safe):%(title)s"]
+            }
+        }
+        let args = options.arguments(url: attempt.mediaURL?.absoluteString ?? url,
                                      ffmpegDirectory: toolchain?.ffmpeg?.deletingLastPathComponent(),
                                      impersonate: attempt.impersonate,
                                      cookieArguments: attempt.cookieArguments,
-                                     printFile: printFile)
+                                     printFile: printFile,
+                                     extraArguments: extra)
 
         let process = StreamingProcess(executable: tool, arguments: args)
         do {
@@ -202,6 +223,14 @@ final class DownloadJob: Identifiable {
     }
 
     func cancel() {
+        if let sniffTask {
+            sniffTask.cancel()
+            self.sniffTask = nil
+            phase = .cancelled
+            statusLine = "Cancelled"
+            completion()
+            return
+        }
         if phase == .queued || phase == .paused {
             phase = .cancelled
             statusLine = "Cancelled"
@@ -407,6 +436,10 @@ final class DownloadJob: Identifiable {
                 launch(next, tool: tool)
                 return
             }
+            if !sniffTried, Self.isUnsupported(attemptErrors.first ?? lastError) {
+                sniffForMedia()
+                return
+            }
             fail(friendlyError(code: status))
             return
         }
@@ -472,6 +505,48 @@ final class DownloadJob: Identifiable {
         statusLine = message
         progressIsIndeterminate = false
         completion()
+    }
+
+    /// yt-dlp has no extractor for this site (or found nothing it recognises on the page).
+    nonisolated static func isUnsupported(_ error: String) -> Bool {
+        let text = error.lowercased()
+        return text.contains("unsupported url") || text.contains("no video formats found")
+    }
+
+    /// For sites yt-dlp doesn't know: look for video the page publishes openly.
+    private func sniffForMedia() {
+        sniffTried = true
+        guard let page = URL(string: url), let tool = toolchain?.ytdlp else {
+            fail(friendlyError(code: 1))
+            return
+        }
+        phase = .preparing
+        progressIsIndeterminate = true
+        statusLine = "Looking for video on the page…"
+        log("Not a site yt-dlp knows; looking for openly published video on \(page.host() ?? "the page")…")
+        sniffTask = Task { @MainActor [weak self] in
+            let found = await MediaSniffer.sniff(page)
+            guard let self, !Task.isCancelled else { return }
+            self.sniffTask = nil
+            if found?.isProtected == true {
+                self.lastError = ""
+                self.fail("This video is copy-protected (DRM) by the site, so it can’t be downloaded.")
+                return
+            }
+            guard let found, let media = found.mediaURLs.first else {
+                self.lastError = ""
+                self.fail("No public video was found on this page. If it plays inside a player from another site, open that player’s own page and copy its link.")
+                return
+            }
+            self.log("Found \(found.mediaURLs.count) video link(s); downloading \(media.absoluteString)")
+            if self.info == nil { self.info = MediaSniffer.info(for: found, url: self.url) }
+            self.lastError = ""
+            self.attemptErrors = []
+            self.launch(Attempt(cookieArguments: self.initialCookies,
+                                impersonate: self.toolchain?.impersonationAvailable ?? false,
+                                note: "Downloading the video found on the page…",
+                                mediaURL: media, pageTitle: found.title), tool: tool)
+        }
     }
 
     /// --embed-subs leaves the sidecar file behind when combined with clipping.
