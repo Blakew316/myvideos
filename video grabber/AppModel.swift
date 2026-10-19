@@ -126,6 +126,8 @@ final class AppModel {
             MainActor.assumeIsolated { AppModel.shared.sync.scheduleSync(model: AppModel.shared) }
         }
         sync.configure(enabled: prefs.iCloudSync, model: self)
+        CompanionServer.shared.handler = { await CompanionAPI.handle($0) }
+        if prefs.companionEnabled { CompanionServer.shared.start() }
 
         Task {
             await toolchain.refresh()
@@ -139,6 +141,16 @@ final class AppModel {
             }
             startSubscriptionTimer()
         }
+    }
+
+    func setCompanionEnabled(_ enabled: Bool) {
+        prefs.companionEnabled = enabled
+        if enabled { CompanionServer.shared.start() } else { CompanionServer.shared.stop() }
+    }
+
+    /// Looks up a link's details (used by the iPhone app).
+    func lookUp(_ link: String) async -> PreviewState {
+        await fetchInfo(url: link, playlist: false)
     }
 
     func setSyncEnabled(_ enabled: Bool) {

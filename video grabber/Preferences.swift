@@ -54,6 +54,8 @@ final class Preferences {
     var avoidMeteredNetworks: Bool { didSet { save(avoidMeteredNetworks, Keys.avoidMetered) } }
     /// Days after watching that subscription downloads move to the Trash (0 = never).
     var cleanupAfterDays: Int { didSet { save(cleanupAfterDays, Keys.cleanupDays) } }
+    /// Lets the iPhone app connect over the local network.
+    var companionEnabled: Bool { didSet { save(companionEnabled, Keys.companion) } }
 
     /// When a synced setting last changed here; the newer side wins when syncing.
     private(set) var syncedSettingsModified: Date
@@ -89,6 +91,7 @@ final class Preferences {
         static let quietEnd = "quietEndHour"
         static let avoidMetered = "avoidMeteredNetworks"
         static let cleanupDays = "cleanupAfterDays"
+        static let companion = "companionEnabled"
         static let syncedModified = "syncedSettingsModified"
     }
 
@@ -134,6 +137,7 @@ final class Preferences {
         quietEndHour = int(Keys.quietEnd, 6)
         avoidMeteredNetworks = bool(Keys.avoidMetered, false)
         cleanupAfterDays = int(Keys.cleanupDays, 0)
+        companionEnabled = bool(Keys.companion, false)
         syncedSettingsModified = d.object(forKey: Keys.syncedModified) as? Date ?? .distantPast
 
         if let path = d.string(forKey: Keys.destination), FileManager.default.fileExists(atPath: path) {

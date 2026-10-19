@@ -29,6 +29,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>My Videos lets your iPhone send links, follow your downloads and play them over your home network.</string>
 	<key>NSServices</key>
 	<array>
 		<dict>

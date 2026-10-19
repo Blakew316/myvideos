@@ -6,6 +6,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import CoreImage
 
 struct SettingsView: View {
     var body: some View {
@@ -13,11 +14,12 @@ struct SettingsView: View {
             Tab("General", systemImage: "gearshape") { GeneralSettings() }
             Tab("Downloads", systemImage: "arrow.down.circle") { DownloadSettings() }
             Tab("Accounts", systemImage: "person.crop.circle") { AccountSettings() }
+            Tab("iPhone", systemImage: "iphone") { CompanionSettings() }
             Tab("Sync", systemImage: "icloud") { SyncSettings() }
             Tab("Components", systemImage: "shippingbox") { ComponentSettings() }
             Tab("Advanced", systemImage: "wrench.and.screwdriver") { AdvancedSettings() }
         }
-        .frame(width: 560)
+        .frame(width: 600)
         .scenePadding()
     }
 }
@@ -294,6 +296,124 @@ private struct AccountSettings: View {
         panel.allowedContentTypes = [.text, .plainText, .item]
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url { prefs.cookieFilePath = url.path }
+    }
+}
+
+// MARK: - iPhone
+
+private struct CompanionSettings: View {
+    private var model: AppModel { AppModel.shared }
+    private var server: CompanionServer { CompanionServer.shared }
+    private var pairing: CompanionPairing { CompanionPairing.shared }
+    @State private var confirmReset = false
+
+    private var host: String { CompanionServer.bonjourHost ?? CompanionServer.ipAddress ?? "this Mac" }
+    private var port: UInt16 { server.port == 0 ? CompanionServer.preferredPort : server.port }
+    private var link: String { "http://\(host):\(port)/?code=\(pairing.code)" }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Use My Videos on iPhone and iPad", isOn: Binding(
+                    get: { model.prefs.companionEnabled },
+                    set: { model.setCompanionEnabled($0) }))
+            } footer: {
+                Text("Send links, follow your downloads, play them and save them to your iPhone — over your home Wi-Fi. Your Mac does the downloading, so keep My Videos open (it can stay in the menu bar).")
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.prefs.companionEnabled {
+                Section {
+                    HStack(alignment: .center, spacing: 20) {
+                        QRCode(text: link)
+                            .frame(width: 148, height: 148)
+                            .padding(10)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Scan with your iPhone’s Camera")
+                                .font(.headline)
+                            Text("Then tap Share › Add to Home Screen, open My Videos and enter this code:")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(pairing.code.prefix(3) + " " + pairing.code.suffix(3))
+                                .font(.system(size: 30, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .tracking(2)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    LabeledContent("Or open in Safari") {
+                        Text("http://\(host):\(port)")
+                            .textSelection(.enabled)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let ip = CompanionServer.ipAddress, CompanionServer.bonjourHost != nil {
+                        LabeledContent("If that doesn’t load") {
+                            Text("http://\(ip):\(port)").textSelection(.enabled).foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Connect Your iPhone")
+                }
+
+                Section {
+                    LabeledContent("Status") {
+                        if server.isRunning {
+                            Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        } else if let error = server.lastError {
+                            Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        } else {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    LabeledContent("Last used from iPhone",
+                                   value: server.lastSeen?.formatted(.relative(presentation: .named)) ?? "Not yet")
+                    HStack {
+                        Spacer()
+                        Button("Disconnect All Devices…", role: .destructive) { confirmReset = true }
+                    }
+                } footer: {
+                    Text("Only devices that entered the code can use My Videos. Disconnecting creates a new code.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .confirmationDialog("Disconnect all iPhones and iPads?", isPresented: $confirmReset) {
+            Button("Disconnect", role: .destructive) { pairing.reset() }
+        } message: {
+            Text("They’ll need the new code to connect again.")
+        }
+    }
+}
+
+/// A crisp QR code rendered with Core Image.
+private struct QRCode: View {
+    let text: String
+
+    var body: some View {
+        if let image = Self.make(text) {
+            Image(nsImage: image)
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+                .accessibilityLabel("QR code for \(text)")
+        } else {
+            Image(systemName: "qrcode").resizable().scaledToFit()
+        }
+    }
+
+    static func make(_ text: String) -> NSImage? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(text.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)) else { return nil }
+        let rep = NSCIImageRep(ciImage: output)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+        return image
     }
 }
 
