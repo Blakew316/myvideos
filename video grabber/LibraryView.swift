@@ -637,6 +637,7 @@ struct LibraryCard: View {
 struct PendingCard: View {
     let job: DownloadJob
     let model: AppModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -671,6 +672,7 @@ struct PendingCard: View {
                 Button("Resume") { model.resume(job) }
             case .failed:
                 Button("Try Again") { model.retry(job) }
+                Button("Sign-In Settings…") { SignInMenu.openAccounts(openSettings) }
                 Button("Copy Error Details") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString("\(job.url)\n\(job.technicalError ?? job.statusLine)", forType: .string)

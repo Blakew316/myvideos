@@ -110,6 +110,8 @@ struct Snapshots {
         render("convert-staged", size: CGSize(width: 760, height: 480)) { NavigationStack { ConvertView(model: model) } }
         model.stagedFiles = []
         render("settings", size: CGSize(width: 620, height: 640)) { SettingsView() }
+        render("accounts", size: CGSize(width: 620, height: 360)) { Form { SignInControls(model: model) }.formStyle(.grouped) }
+        render("new-download-signin", size: CGSize(width: 480, height: 170)) { NewDownloadSheet(model: model) }
         await model.toolchain.refresh()
         model.urlString = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
         for _ in 0..<40 where model.previewInfo == nil { try? await Task.sleep(for: .milliseconds(500)) }

@@ -206,3 +206,95 @@ struct SignInControls: View {
         }
     }
 }
+
+// MARK: - Sign-in menu
+
+/// How downloads sign in, switchable right where you download: a browser's sign-ins,
+/// My Videos Sign-In, or a cookies.txt file.
+struct SignInMenu: View {
+    @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+
+    private var prefs: Preferences { model.prefs }
+
+    private var needsAttention: Bool {
+        if prefs.cookieSource == .none { return false }
+        if case .problem = model.signIn.state { return true }
+        return false
+    }
+
+    private var title: String {
+        if needsAttention { return "Sign-In Needs Attention" }
+        switch prefs.cookieSource {
+        case .none: return "Not Signed In"
+        case .browser: return "Signed In with \(prefs.cookieBrowser.displayName)"
+        case .builtIn: return "My Videos Sign-In"
+        case .file: return "Signed In with cookies.txt"
+        }
+    }
+
+    var body: some View {
+        Menu {
+            Toggle("Don’t Sign In", isOn: binding { prefs.cookieSource == .none } set: { use(.none) })
+            Section("Use Your Sign-Ins From") {
+                ForEach(CookieBrowser.allCases) { browser in
+                    Toggle(browser.displayName, isOn: binding {
+                        prefs.cookieSource == .browser && prefs.cookieBrowser == browser
+                    } set: {
+                        if prefs.cookieBrowser != browser { prefs.cookieBrowserProfile = "" }
+                        prefs.cookieBrowser = browser
+                        use(.browser)
+                    })
+                }
+            }
+            Divider()
+            Toggle("My Videos Sign-In…", isOn: binding { prefs.cookieSource == .builtIn } set: {
+                use(.builtIn)
+                openWindow(id: "signin")
+            })
+            Toggle("cookies.txt File…", isOn: binding { prefs.cookieSource == .file } set: { chooseFile() })
+            Divider()
+            Button("Accounts Settings…") { Self.openAccounts(openSettings) }
+        } label: {
+            Label(title, systemImage: needsAttention ? "exclamationmark.triangle.fill"
+                  : prefs.cookieSource == .none ? "person.crop.circle" : "person.crop.circle.badge.checkmark")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .foregroundStyle(needsAttention ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+        .font(.callout)
+        .help("Choose how downloads sign in to sites, for private and members-only videos")
+    }
+
+    /// Opens Settings on the Accounts tab.
+    static func openAccounts(_ openSettings: OpenSettingsAction) {
+        // SwiftUI remembers the Settings tab here; Accounts is the fourth tab.
+        UserDefaults.standard.set(3, forKey: "com_apple_SwiftUI_Settings_selectedTabIndex")
+        NSApp.activate()
+        openSettings()
+    }
+
+    private func binding(_ get: @escaping () -> Bool, set: @escaping () -> Void) -> Binding<Bool> {
+        Binding(get: get, set: { if $0 { set() } })
+    }
+
+    private func use(_ source: CookieSource) {
+        prefs.cookieSource = source
+        Task { await model.signIn.check(prefs: prefs, toolchain: model.toolchain, readBrowser: source == .browser) }
+    }
+
+    private func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a cookies.txt File"
+        panel.message = "Export it from a browser where you’re signed in (Netscape format)."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.text, .plainText, .item]
+        panel.prompt = "Use File"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        prefs.cookieFilePath = url.path
+        use(.file)
+    }
+}

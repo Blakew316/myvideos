@@ -58,6 +58,7 @@ private struct MenuBarIcon: View {
 
 private struct AppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     private var model: AppModel { AppModel.shared }
 
     var body: some Commands {
@@ -109,6 +110,7 @@ private struct AppCommands: Commands {
             .keyboardShortcut("n", modifiers: [.command, .option, .control])
             Divider()
             Button("Sign In to a Site…") { openWindow(id: "signin") }
+            Button("Accounts Settings…") { SignInMenu.openAccounts(openSettings) }
         }
         CommandGroup(before: .sidebar) {
             Button("All") { show(.library(.all)) }.keyboardShortcut("1")

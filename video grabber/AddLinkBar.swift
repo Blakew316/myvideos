@@ -43,15 +43,18 @@ struct NewDownloadSheet: View {
                 AddCard(model: model, close: close)
             } else {
                 Divider()
-                HStack {
+                VStack(alignment: .leading, spacing: 14) {
                     Text(model.urlString.isEmpty ? "Videos, playlists and songs from YouTube, Vimeo, TikTok and over a thousand other sites."
                                                  : "That doesn’t look like a web link yet.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 16)
-                    Button("Cancel", action: close)
-                        .keyboardShortcut(.cancelAction)
+                    HStack {
+                        SignInMenu(model: model)
+                        Spacer(minLength: 16)
+                        Button("Cancel", action: close)
+                            .keyboardShortcut(.cancelAction)
+                    }
                 }
                 .padding(20)
             }
@@ -149,7 +152,7 @@ struct AddCard: View {
             }
 
             HStack(spacing: 10) {
-                signInNote
+                SignInMenu(model: model)
                 Spacer()
                 Button("Cancel", action: close)
                     .keyboardShortcut(.cancelAction)
@@ -247,18 +250,6 @@ struct AddCard: View {
                 ProgressView().controlSize(.small)
                 Text("Looking up this link…").foregroundStyle(.secondary)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var signInNote: some View {
-        if prefs.cookieSource != .none {
-            let needsAttention: Bool = { if case .problem = model.signIn.state { return true }; return false }()
-            Label(needsAttention ? "Sign-in needs attention" : "Signed in",
-                  systemImage: needsAttention ? "exclamationmark.triangle.fill" : "person.crop.circle.badge.checkmark")
-                .font(.caption)
-                .foregroundStyle(needsAttention ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                .help(needsAttention ? "Open Settings → Accounts to fix sign-in" : "Using your \(prefs.cookieSource.displayName)")
         }
     }
 
