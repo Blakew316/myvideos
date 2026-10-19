@@ -52,6 +52,12 @@ final class HistoryStore {
         save()
     }
 
+    func update(_ id: HistoryItem.ID, _ change: (inout HistoryItem) -> Void) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        change(&items[index])
+        save()
+    }
+
     func item(id: HistoryItem.ID) -> HistoryItem? {
         items.first { $0.id == id }
     }

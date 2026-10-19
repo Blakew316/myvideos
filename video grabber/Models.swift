@@ -205,6 +205,10 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
     var fetchLyrics = true
     /// Fixed folder inside the destination (subscriptions save into one per channel).
     var subfolder: String?
+    /// Even out loudness after downloading (audio).
+    var normalizeVolume = false
+    /// Replace an existing file with the same name (upgrading a download's quality).
+    var forceOverwrite = false
 
     var isAudio: Bool { quality == .audio }
 
@@ -262,7 +266,17 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
         if !isAudio, subtitles != .off {
             args += ["--write-subs", "--write-auto-subs", "--sub-langs", subtitleLanguage.ytdlpCodes]
             args += subtitles == .embed ? ["--embed-subs"] : ["--convert-subs", "srt"]
+            // YouTube often rate-limits subtitle requests; that must never cost the video itself.
+            args += ["--ignore-errors"]
         }
+        // Playlists downloaded as audio become an album: numbered tracks under the playlist's name.
+        if isAudio && downloadPlaylist {
+            if !embedArtwork { args += ["--embed-metadata"] }
+            args += ["--parse-metadata", "playlist_index:%(track_number)s",
+                     "--parse-metadata", "playlist_title:%(album)s",
+                     "--parse-metadata", "playlist_uploader:%(album_artist)s"]
+        }
+        if forceOverwrite { args += ["--force-overwrites"] }
 
         args += ["--newline", "--no-mtime",
                  "--retries", "5", "--fragment-retries", "5", "--socket-timeout", "30",
@@ -409,9 +423,55 @@ nonisolated struct HistoryItem: Codable, Sendable, Identifiable, Equatable {
     var byteCount: Int64?
     /// The Mac it was downloaded on (history syncs through iCloud Drive).
     var deviceName: String?
+    /// The site's own ID for the video ("Youtube:jNQXAC9IVRw"), for spotting repeats.
+    var mediaID: String?
+    var subscriptionID: UUID?
+    var quality: DownloadQuality?
+    /// Last opened from My Videos.
+    var lastPlayedAt: Date?
+    /// Set when Smart Cleanup moved the file to the Trash.
+    var cleanedUpAt: Date?
 
     var fileURLs: [URL] { filePaths.map { URL(fileURLWithPath: $0) } }
     var primaryFile: URL? { fileURLs.first }
+}
+
+// MARK: - Link identity
+
+nonisolated enum LinkIdentity {
+    /// A stable key for "the same video", ignoring tracking parameters and URL variants:
+    /// youtu.be/ID, youtube.com/watch?v=ID&si=… and /shorts/ID all become "youtube:ID".
+    static func key(for link: String) -> String? {
+        guard let components = URLComponents(string: link.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let host = components.host?.lowercased() else { return nil }
+        let bareHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : (host.hasPrefix("m.") ? String(host.dropFirst(2)) : host)
+        let path = components.path
+        if bareHost == "youtu.be" {
+            let id = path.split(separator: "/").first.map(String.init) ?? ""
+            return id.isEmpty ? nil : "youtube:\(id)"
+        }
+        if bareHost.hasSuffix("youtube.com") {
+            if let v = components.queryItems?.first(where: { $0.name == "v" })?.value { return "youtube:\(v)" }
+            let parts = path.split(separator: "/")
+            if parts.count >= 2, ["shorts", "live", "embed"].contains(String(parts[0])) {
+                return "youtube:\(parts[1])"
+            }
+        }
+        let trackers: Set<String> = ["si", "feature", "fbclid", "gclid", "ref", "t", "share"]
+        let query = (components.queryItems ?? [])
+            .filter { !trackers.contains($0.name) && !$0.name.hasPrefix("utm_") }
+            .sorted { $0.name < $1.name }
+            .map { "\($0.name)=\($0.value ?? "")" }
+            .joined(separator: "&")
+        var trimmedPath = path
+        while trimmedPath.hasSuffix("/") { trimmedPath.removeLast() }
+        return bareHost + trimmedPath + (query.isEmpty ? "" : "?" + query)
+    }
+
+    static func mediaKey(site: String?, id: String?) -> String? {
+        guard let site, let id, !id.isEmpty else { return nil }
+        return "\(site):\(id)"
+    }
 }
 
 // MARK: - Formatting helpers

@@ -26,6 +26,21 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @Bindable private var prefs = AppModel.shared.prefs
+    @State private var copiedBookmarklet = false
+
+    /// A bookmark whose “address” sends the current page to My Videos.
+    static let bookmarklet = "javascript:location.href='myvideos://download?url='+encodeURIComponent(location.href)"
+
+    private var subscriptionFooter: String {
+        var parts: [String] = []
+        if prefs.subscriptionsOnlyAtNight {
+            parts.append("New uploads download between \(QuietHours.hourLabel(prefs.quietStartHour)) and \(QuietHours.hourLabel(prefs.quietEndHour)) while your Mac is awake. “Check Now” always works.")
+        }
+        if prefs.cleanupAfterDays > 0 {
+            parts.append("Only videos you’ve opened are moved to the Trash — unwatched ones stay.")
+        }
+        return parts.isEmpty ? "Subscriptions check for new uploads while My Videos is open." : parts.joined(separator: " ")
+    }
 
     var body: some View {
         Form {
@@ -60,7 +75,7 @@ private struct GeneralSettings: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Subscriptions") {
+            Section {
                 Picker("Check for new uploads", selection: $prefs.subscriptionInterval) {
                     Text("Every 30 Minutes").tag(30)
                     Text("Every Hour").tag(60)
@@ -68,6 +83,45 @@ private struct GeneralSettings: View {
                     Text("Every 6 Hours").tag(360)
                     Text("Once a Day").tag(1440)
                 }
+                Toggle("Only download during set hours", isOn: $prefs.subscriptionsOnlyAtNight)
+                if prefs.subscriptionsOnlyAtNight {
+                    HStack {
+                        Picker("From", selection: $prefs.quietStartHour) {
+                            ForEach(0..<24, id: \.self) { Text(QuietHours.hourLabel($0)).tag($0) }
+                        }
+                        Picker("to", selection: $prefs.quietEndHour) {
+                            ForEach(0..<24, id: \.self) { Text(QuietHours.hourLabel($0)).tag($0) }
+                        }
+                    }
+                }
+                Toggle("Wait when on a phone hotspot or Low Data Mode", isOn: $prefs.avoidMeteredNetworks)
+                Picker("After watching, move to Trash", selection: $prefs.cleanupAfterDays) {
+                    Text("Never").tag(0)
+                    Text("After 1 Day").tag(1)
+                    Text("After 1 Week").tag(7)
+                    Text("After 30 Days").tag(30)
+                }
+            } header: {
+                Text("Subscriptions")
+            } footer: {
+                Text(subscriptionFooter).foregroundStyle(.secondary)
+            }
+
+            Section {
+                LabeledContent("Download button") {
+                    HStack {
+                        Button(copiedBookmarklet ? "Copied" : "Copy Button Code") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(Self.bookmarklet, forType: .string)
+                            copiedBookmarklet = true
+                        }
+                    }
+                }
+            } header: {
+                Text("Browser")
+            } footer: {
+                Text("Adds a one-click “Download” button to your browser’s Favorites bar. In Safari: choose Bookmarks › Add Bookmark, save it to Favorites, then choose Bookmarks › Edit Bookmarks and paste the copied code as its address. The Share button in Safari’s toolbar also offers My Videos.")
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -129,9 +183,15 @@ private struct DownloadSettings: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Music") {
+            Section {
                 Toggle("Add audio downloads to Apple Music", isOn: $prefs.addToMusic)
                 Toggle("Find and add lyrics", isOn: $prefs.fetchLyrics)
+                Toggle("Even out volume", isOn: $prefs.normalizeVolume)
+            } header: {
+                Text("Music")
+            } footer: {
+                Text("Playlists downloaded as audio become an album, with each song numbered in order.")
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

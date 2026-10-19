@@ -45,6 +45,15 @@ final class Preferences {
     var autoCheckUpdates: Bool { didSet { save(autoCheckUpdates, Keys.autoUpdate) } }
     var hasCompletedOnboarding: Bool { didSet { save(hasCompletedOnboarding, Keys.onboarding) } }
     var iCloudSync: Bool { didSet { save(iCloudSync, Keys.iCloudSync) } }
+    var normalizeVolume: Bool { didSet { save(normalizeVolume, Keys.normalizeVolume) } }
+    /// Subscriptions only download between these hours (e.g. overnight).
+    var subscriptionsOnlyAtNight: Bool { didSet { save(subscriptionsOnlyAtNight, Keys.onlyAtNight) } }
+    var quietStartHour: Int { didSet { save(quietStartHour, Keys.quietStart) } }
+    var quietEndHour: Int { didSet { save(quietEndHour, Keys.quietEnd) } }
+    /// Skip subscription downloads on a phone hotspot or other metered connection.
+    var avoidMeteredNetworks: Bool { didSet { save(avoidMeteredNetworks, Keys.avoidMetered) } }
+    /// Days after watching that subscription downloads move to the Trash (0 = never).
+    var cleanupAfterDays: Int { didSet { save(cleanupAfterDays, Keys.cleanupDays) } }
 
     /// When a synced setting last changed here; the newer side wins when syncing.
     private(set) var syncedSettingsModified: Date
@@ -74,6 +83,12 @@ final class Preferences {
         static let autoUpdate = "autoCheckUpdates"
         static let onboarding = "hasCompletedOnboarding"
         static let iCloudSync = "iCloudSync"
+        static let normalizeVolume = "normalizeVolume"
+        static let onlyAtNight = "subscriptionsOnlyAtNight"
+        static let quietStart = "quietStartHour"
+        static let quietEnd = "quietEndHour"
+        static let avoidMetered = "avoidMeteredNetworks"
+        static let cleanupDays = "cleanupAfterDays"
         static let syncedModified = "syncedSettingsModified"
     }
 
@@ -113,6 +128,12 @@ final class Preferences {
         autoCheckUpdates = bool(Keys.autoUpdate, true)
         hasCompletedOnboarding = bool(Keys.onboarding, false)
         iCloudSync = bool(Keys.iCloudSync, false)
+        normalizeVolume = bool(Keys.normalizeVolume, false)
+        subscriptionsOnlyAtNight = bool(Keys.onlyAtNight, false)
+        quietStartHour = int(Keys.quietStart, 1)
+        quietEndHour = int(Keys.quietEnd, 6)
+        avoidMeteredNetworks = bool(Keys.avoidMetered, false)
+        cleanupAfterDays = int(Keys.cleanupDays, 0)
         syncedSettingsModified = d.object(forKey: Keys.syncedModified) as? Date ?? .distantPast
 
         if let path = d.string(forKey: Keys.destination), FileManager.default.fileExists(atPath: path) {
@@ -141,7 +162,8 @@ final class Preferences {
                         cookieSource: cookieSource, cookieBrowser: cookieBrowser,
                         cookieFilePath: cookieFilePath,
                         sponsorBlock: sponsorBlock, organize: organize,
-                        speedLimit: speedLimit, fetchLyrics: fetchLyrics)
+                        speedLimit: speedLimit, fetchLyrics: fetchLyrics,
+                        normalizeVolume: normalizeVolume)
     }
 
     // MARK: - Sync

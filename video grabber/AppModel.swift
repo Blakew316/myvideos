@@ -358,7 +358,8 @@ final class AppModel {
             if let subID = job.subscriptionID, let entryID = job.feedEntryID {
                 subscriptions.update(subID) { $0.downloadedIDs.append(entryID) }
             }
-            if job.options.isAudio && (job.options.addToMusic || job.options.fetchLyrics || job.options.embedArtwork) {
+            if job.options.isAudio && (job.options.addToMusic || job.options.fetchLyrics
+                                       || job.options.embedArtwork || job.options.normalizeVolume) {
                 Task { await finishAudio(job) }
             }
             if job.subscriptionID == nil {
@@ -443,6 +444,14 @@ final class AppModel {
     private func recordHistory(for job: DownloadJob) {
         guard !job.savedFiles.isEmpty else { return }
         let size = job.savedFiles.reduce(Int64(0)) { $0 + DownloadJob.fileSize($1) }
+        // A quality upgrade replaces the old entry, and the old file if it had another name.
+        if let oldID = job.replacesHistoryID, let old = history.item(id: oldID) {
+            let newPaths = Set(job.savedFiles.map(\.path))
+            for file in old.fileURLs where !newPaths.contains(file.path) {
+                try? FileManager.default.trashItem(at: file, resultingItemURL: nil)
+            }
+            history.remove(ids: [oldID])
+        }
         history.add(HistoryItem(title: job.displayTitle,
                                 uploader: job.info?.uploader,
                                 sourceURL: job.url,
@@ -453,11 +462,21 @@ final class AppModel {
                                 isPlaylist: job.savedFiles.count > 1,
                                 duration: job.options.clip.map { $0.upperBound - $0.lowerBound } ?? job.info?.duration,
                                 byteCount: size,
-                                deviceName: Self.deviceName))
+                                deviceName: Self.deviceName,
+                                mediaID: LinkIdentity.mediaKey(site: job.info?.site, id: job.info?.id),
+                                subscriptionID: job.subscriptionID,
+                                quality: job.options.quality))
     }
 
     /// Finds lyrics, writes them into each song, and adds the songs to Apple Music.
     private func finishAudio(_ job: DownloadJob) async {
+        if job.options.normalizeVolume, let ffmpeg = toolchain.ffmpeg {
+            job.musicState = .evening
+            for file in job.savedFiles where await AudioTools.normalize(file, ffmpeg: ffmpeg) {
+                appendLog("Evened out volume: \(file.lastPathComponent)")
+            }
+            job.musicState = .none
+        }
         let files = job.savedFiles.filter(MusicLibrary.canImport)
         guard !files.isEmpty else {
             if job.options.addToMusic, let first = job.savedFiles.first {
@@ -539,6 +558,48 @@ final class AppModel {
         alert = AppAlert(title: denied ? "Allow My Videos to Use Music" : "Couldn’t Add to Apple Music",
                          message: error.localizedDescription,
                          showsAutomationButton: denied)
+    }
+
+    /// Downloads the best version available and replaces the existing file with it.
+    func upgradeToBestQuality(_ item: HistoryItem) {
+        var options = prefs.baseOptions
+        options.quality = .best
+        options.downloadPlaylist = item.isPlaylist
+        options.forceOverwrite = true
+        if let first = item.primaryFile {
+            // Save next to the original, wherever it was organized.
+            options.destinationPath = item.isPlaylist
+                ? first.deletingLastPathComponent().deletingLastPathComponent().path
+                : first.deletingLastPathComponent().path
+            options.organize = .none
+            options.subfolder = nil
+        }
+        let info = MediaInfo(id: "", title: item.title, uploader: item.uploader, duration: item.duration,
+                             thumbnailURL: item.thumbnailURL, webpageURL: item.sourceURL, site: nil,
+                             isPlaylist: item.isPlaylist, playlistCount: nil, track: nil, artist: nil,
+                             album: nil, isLive: false, channelURL: nil)
+        let job = enqueue(url: item.sourceURL, options: options, info: info, tags: MusicTags())
+        job.replacesHistoryID = item.id
+        selection = .queue
+    }
+
+    /// A previous download of the same video, if there is one.
+    func existingDownload(link: String, info: MediaInfo?) -> HistoryItem? {
+        let mediaKey = LinkIdentity.mediaKey(site: info?.site, id: info?.id)
+        let linkKey = LinkIdentity.key(for: link)
+        return history.items.first { item in
+            guard item.cleanedUpAt == nil else { return false }
+            if let mediaKey, item.mediaID == mediaKey { return true }
+            return linkKey != nil && LinkIdentity.key(for: item.sourceURL) == linkKey
+        }
+    }
+
+    /// Records that files were opened from My Videos (for Storage and Smart Cleanup).
+    func markPlayed(_ files: [URL]) {
+        let paths = Set(files.map(\.path))
+        for item in history.items where item.filePaths.contains(where: paths.contains) {
+            history.update(item.id) { $0.lastPlayedAt = Date() }
+        }
     }
 
     func redownload(_ item: HistoryItem) {
@@ -650,7 +711,19 @@ final class AppModel {
         }
     }
 
+    /// Whether automatic subscription downloads may run right now (download hours, network).
+    var subscriptionsMayRun: Bool {
+        if prefs.avoidMeteredNetworks && NetworkMonitor.shared.isMetered { return false }
+        if prefs.subscriptionsOnlyAtNight {
+            let hour = Calendar.current.component(.hour, from: Date())
+            return QuietHours.contains(hour: hour, start: prefs.quietStartHour, end: prefs.quietEndHour)
+        }
+        return true
+    }
+
     func checkAllSubscriptions(onlyDue: Bool) async {
+        // Scheduled checks respect download hours; "Check Now" always runs.
+        if onlyDue && !subscriptionsMayRun { return }
         let interval = TimeInterval(prefs.subscriptionInterval * 60)
         for sub in subscriptions.items where sub.isEnabled {
             if onlyDue, let last = sub.lastChecked, Date().timeIntervalSince(last) < interval { continue }
@@ -664,8 +737,29 @@ final class AppModel {
             while !Task.isCancelled {
                 guard let self else { return }
                 if self.toolchain.isReady { await self.checkAllSubscriptions(onlyDue: true) }
+                self.runSmartCleanupIfDue()
                 try? await Task.sleep(for: .seconds(120))
             }
+        }
+    }
+
+    private var lastCleanup = Date.distantPast
+
+    /// Moves watched subscription downloads to the Trash once they're old enough.
+    private func runSmartCleanupIfDue() {
+        guard prefs.cleanupAfterDays > 0, Date().timeIntervalSince(lastCleanup) > 3600 else { return }
+        lastCleanup = Date()
+        let cutoff = Date().addingTimeInterval(-Double(prefs.cleanupAfterDays) * 86400)
+        for item in history.items where item.subscriptionID != nil && item.cleanedUpAt == nil {
+            let files = item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+            guard !files.isEmpty else { continue }
+            // Only things that were actually watched — never unwatched uploads.
+            let watched = ([item.lastPlayedAt] + files.map(Playback.lastOpened)).compactMap { $0 }
+                .filter { $0 > item.date }.max()
+            guard let watched, watched < cutoff else { continue }
+            for file in files { try? FileManager.default.trashItem(at: file, resultingItemURL: nil) }
+            history.update(item.id) { $0.cleanedUpAt = Date() }
+            appendLog("Smart Cleanup moved “\(item.title)” to the Trash.")
         }
     }
 

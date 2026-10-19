@@ -11,6 +11,7 @@ struct ComposerView: View {
     @Bindable var model: AppModel
     @Bindable private var settings: Preferences
     @FocusState private var urlFocused: Bool
+    @Environment(\.openWindow) private var openWindow
 
     init(model: AppModel) {
         self.model = model
@@ -191,6 +192,27 @@ struct ComposerView: View {
             }
         }
 
+        if model.isValidURL, let existing = model.existingDownload(link: model.trimmedURL, info: model.previewInfo) {
+            let files = existing.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+            NoticeBanner(systemImage: "checkmark.circle.fill", tint: .green,
+                         title: "You’ve Downloaded This Before",
+                         message: files.isEmpty
+                             ? "On \(existing.date.formatted(date: .abbreviated, time: .omitted)) — the file has since been moved or deleted."
+                             : "On \(existing.date.formatted(date: .abbreviated, time: .omitted)). You can download it again anyway.") {
+                if let file = files.first {
+                    HStack(spacing: 8) {
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }
+                            .buttonStyle(.glass)
+                        Button("Open") {
+                            model.markPlayed([file])
+                            if MediaPlayer.canPlay(file) { openWindow(value: file) } else { NSWorkspace.shared.open(file) }
+                        }
+                        .buttonStyle(.glassProminent)
+                    }
+                }
+            }
+        }
+
         if model.clipboardHasLink && model.urlString.isEmpty {
             NoticeBanner(systemImage: "doc.on.clipboard.fill", tint: .accentColor,
                          title: "You Copied a Link",
@@ -238,7 +260,8 @@ struct ComposerView: View {
                     .disabled(prefs.audioFormat == .wav)
                 }
             } else {
-                FormRow(title: "Subtitles", systemImage: "captions.bubble.fill", color: .teal) {
+                FormRow(title: "Subtitles", systemImage: "captions.bubble.fill", color: .teal,
+                        detail: prefs.subtitles == .off ? nil : "Uses an automatic translation when there’s none in your language.") {
                     HStack(spacing: 8) {
                         if prefs.subtitles != .off {
                             Picker("Language", selection: $settings.subtitleLanguage) {
@@ -338,7 +361,13 @@ struct ComposerView: View {
 
     private var musicCard: some View {
         FormCard(title: "Apple Music",
-                 footer: model.downloadPlaylist ? "Each song keeps its own title and artist." : nil) {
+                 footer: model.downloadPlaylist ? "The playlist becomes an album, with each song numbered in order." : nil) {
+            FormRow(title: "Even Out Volume", systemImage: "speaker.wave.2.fill", color: .teal,
+                    detail: "So every song plays at the same loudness.") {
+                Toggle("Even Out Volume", isOn: $settings.normalizeVolume)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
             FormRow(title: "Find Lyrics", systemImage: "quote.bubble.fill", color: .indigo,
                     detail: "Adds lyrics to the song when they’re available.") {
                 Toggle("Find Lyrics", isOn: $settings.fetchLyrics)

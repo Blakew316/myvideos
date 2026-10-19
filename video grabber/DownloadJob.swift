@@ -14,7 +14,7 @@ final class DownloadJob: Identifiable {
     }
 
     enum MusicState: Equatable {
-        case none, findingLyrics, adding, added, failed(String)
+        case none, evening, findingLyrics, adding, added, failed(String)
     }
 
     let id = UUID()
@@ -25,6 +25,8 @@ final class DownloadJob: Identifiable {
     /// Set for uploads downloaded automatically from a subscription.
     var subscriptionID: UUID?
     var feedEntryID: String?
+    /// Set when this download replaces an older one in History (quality upgrade).
+    var replacesHistoryID: UUID?
     let createdAt = Date()
 
     private(set) var phase: Phase = .queued

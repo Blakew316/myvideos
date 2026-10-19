@@ -143,6 +143,7 @@ struct JobRow: View {
     private var statusText: String {
         var text = job.statusLine
         switch job.musicState {
+        case .evening: text += " · Evening out volume…"
         case .findingLyrics: text += " · Finding lyrics…"
         case .adding: text += " · Adding to Apple Music…"
         case .added: text += " · Added to Apple Music"
@@ -170,6 +171,7 @@ struct JobRow: View {
 
     private func openFile() {
         guard job.phase == .finished, let file = job.savedFiles.first else { return }
+        model.markPlayed([file])
         if MediaPlayer.canPlay(file) { openWindow(value: file) } else { NSWorkspace.shared.open(file) }
     }
 
@@ -250,6 +252,7 @@ struct HistoryView: View {
     @State private var selection = Set<HistoryItem.ID>()
     @State private var confirmClear = false
     @State private var quickLookURL: URL?
+    @State private var showStorage = false
     @Environment(\.openWindow) private var openWindow
 
     enum Filter: String, CaseIterable, Identifiable {
@@ -318,6 +321,15 @@ struct HistoryView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    showStorage = true
+                } label: {
+                    Label("Storage", systemImage: "internaldrive")
+                }
+                .help("See how much space your downloads use")
+                .disabled(model.history.items.isEmpty)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     confirmClear = true
                 } label: {
                     Label("Clear History", systemImage: "trash")
@@ -326,6 +338,8 @@ struct HistoryView: View {
                 .disabled(model.history.items.isEmpty)
             }
         }
+        .sheet(isPresented: $showStorage) { StorageView(model: model) }
+        .onChange(of: quickLookURL) { if let url = quickLookURL { model.markPlayed([url]) } }
         .confirmationDialog("Clear your download history?", isPresented: $confirmClear) {
             Button("Clear History", role: .destructive) { model.history.clear() }
         } message: {
@@ -383,6 +397,7 @@ struct HistoryView: View {
                     : "“\(item.title)” has been moved or deleted. You can download it again from the context menu.")
             return
         }
+        model.markPlayed(Array(files.prefix(5)))
         for file in files.prefix(5) {
             if MediaPlayer.canPlay(file) { openWindow(value: file) } else { NSWorkspace.shared.open(file) }
         }
@@ -397,8 +412,11 @@ struct HistoryView: View {
                 .disabled(files.isEmpty)
             Button("Quick Look") { quickLookURL = files.first }
                 .disabled(files.isEmpty)
-            Button("Open With Default App") { files.prefix(10).forEach { NSWorkspace.shared.open($0) } }
-                .disabled(files.isEmpty)
+            Button("Open With Default App") {
+                model.markPlayed(Array(files.prefix(10)))
+                files.prefix(10).forEach { NSWorkspace.shared.open($0) }
+            }
+            .disabled(files.isEmpty)
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }
                 .disabled(files.isEmpty)
             if items.count == 1, let item = items.first {
@@ -417,6 +435,9 @@ struct HistoryView: View {
                     }
                 }
                 Divider()
+                if !item.isAudio && item.quality != .best {
+                    Button("Replace with Best Quality") { model.upgradeToBestQuality(item) }
+                }
                 Button("Download Again") { model.redownload(item) }
                 Button("Copy Link") {
                     NSPasteboard.general.clearContents()
@@ -460,7 +481,12 @@ struct HistoryRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if onAnotherMac {
+                if let cleaned = item.cleanedUpAt {
+                    Label("Moved to Trash after watching · \(cleaned.formatted(date: .abbreviated, time: .omitted))",
+                          systemImage: "sparkles")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if onAnotherMac {
                     Label("On \(item.deviceName ?? "another Mac")", systemImage: "laptopcomputer")
                         .font(.caption)
                         .foregroundStyle(.secondary)
