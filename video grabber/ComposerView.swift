@@ -417,18 +417,7 @@ struct ComposerView: View {
                     Button("Choose…", action: chooseFolder)
                 }
             }
-            FormRow(title: "Sign-In", systemImage: "person.crop.circle.badge.checkmark", color: .green) {
-                HStack(spacing: 8) {
-                    Picker("Sign-In", selection: $settings.cookieSource) {
-                        ForEach(CookieSource.allCases) { Text($0.displayName).tag($0) }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                    SettingsLink {
-                        Text("Manage…")
-                    }
-                }
-            }
+            SignInControls(model: model, compact: true)
         }
     }
 

@@ -24,6 +24,7 @@ final class AppModel {
     let history = HistoryStore()
     let subscriptions = SubscriptionStore()
     let sync = SyncService()
+    let signIn = SignInStatus()
 
     /// The Mac's name as shown in Sharing settings, recorded with each download.
     static let deviceName: String = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "This Mac"
@@ -839,6 +840,10 @@ final class AppModel {
         case .file:
             return options.cookieFilePath.isEmpty ? [] : ["--cookies", options.cookieFilePath]
         case .browser:
+            // Read once and reused, so the browser's Keychain item isn't unlocked on every download.
+            if let file = await signIn.browserCookiesForDownload(prefs: prefs, toolchain: toolchain) {
+                return ["--cookies", file.path]
+            }
             return ["--cookies-from-browser", options.cookieBrowser.rawValue]
         case .builtIn:
             guard let file = await SignInSession.exportCookies() else { return [] }
@@ -929,8 +934,16 @@ final class AppModel {
 // MARK: - Notifications
 
 enum Notifier {
+    private static var asked = false
+
+    /// Uses the async API: the callback form reports back on a background thread, which
+    /// would crash a main-actor closure the moment the user answers the permission prompt.
     static func requestAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        guard !asked else { return }
+        asked = true
+        Task.detached(priority: .utility) {
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        }
     }
 
     /// Only notifies when My Videos isn't frontmost — otherwise the window already says it.

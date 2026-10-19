@@ -6,6 +6,7 @@
 import Foundation
 import Observation
 import Sparkle
+import Combine
 
 /// Automatic app updates through Sparkle. Stays dormant until a release feed and signing
 /// key are set in Info.plist (SUFeedURL / SUPublicEDKey) — see scripts/release.sh.
@@ -15,7 +16,7 @@ final class AppUpdater {
 
     private let controller: SPUStandardUpdaterController?
     private(set) var canCheckForUpdates = false
-    private var observation: NSKeyValueObservation?
+    private var observation: AnyCancellable?
 
     var isConfigured: Bool { controller != nil }
 
@@ -39,9 +40,10 @@ final class AppUpdater {
         let controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         self.controller = controller
         automaticallyChecks = controller.updater.automaticallyChecksForUpdates
-        observation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
-            MainActor.assumeIsolated { self?.canCheckForUpdates = updater.canCheckForUpdates }
-        }
+        canCheckForUpdates = controller.updater.canCheckForUpdates
+        observation = controller.updater.publisher(for: \.canCheckForUpdates)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.canCheckForUpdates = $0 }
     }
 
     func checkForUpdates() {

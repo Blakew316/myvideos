@@ -5,6 +5,7 @@
 
 import SwiftUI
 import WebKit
+import Combine
 
 /// A small, private browser for signing in to video sites. Its sign-ins are exported
 /// to yt-dlp so members-only, private and age-restricted videos can be downloaded.
@@ -74,6 +75,7 @@ struct SignInView: View {
                 Button("Done") {
                     Task {
                         _ = await SignInSession.exportCookies()
+                        await AppModel.shared.signIn.check(prefs: AppModel.shared.prefs, toolchain: AppModel.shared.toolchain)
                         dismissWindow(id: "signin")
                     }
                 }
@@ -96,7 +98,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate {
     var progress = 0.0
     var canGoBack = false
     var canGoForward = false
-    private var observations: [NSKeyValueObservation] = []
+    private var observations: [AnyCancellable] = []
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -106,13 +108,14 @@ final class BrowserModel: NSObject, WKNavigationDelegate {
         webView.allowsBackForwardNavigationGestures = true
         super.init()
         webView.navigationDelegate = self
+        // Publishers delivered on the main queue — never a background-thread KVO callback.
         observations = [
-            webView.observe(\.title) { [weak self] web, _ in MainActor.assumeIsolated { self?.title = web.title ?? "" } },
-            webView.observe(\.url) { [weak self] web, _ in MainActor.assumeIsolated { self?.host = web.url?.host() ?? "" } },
-            webView.observe(\.isLoading) { [weak self] web, _ in MainActor.assumeIsolated { self?.isLoading = web.isLoading } },
-            webView.observe(\.estimatedProgress) { [weak self] web, _ in MainActor.assumeIsolated { self?.progress = web.estimatedProgress } },
-            webView.observe(\.canGoBack) { [weak self] web, _ in MainActor.assumeIsolated { self?.canGoBack = web.canGoBack } },
-            webView.observe(\.canGoForward) { [weak self] web, _ in MainActor.assumeIsolated { self?.canGoForward = web.canGoForward } },
+            webView.publisher(for: \.title).receive(on: DispatchQueue.main).sink { [weak self] in self?.title = $0 ?? "" },
+            webView.publisher(for: \.url).receive(on: DispatchQueue.main).sink { [weak self] in self?.host = $0?.host() ?? "" },
+            webView.publisher(for: \.isLoading).receive(on: DispatchQueue.main).sink { [weak self] in self?.isLoading = $0 },
+            webView.publisher(for: \.estimatedProgress).receive(on: DispatchQueue.main).sink { [weak self] in self?.progress = $0 },
+            webView.publisher(for: \.canGoBack).receive(on: DispatchQueue.main).sink { [weak self] in self?.canGoBack = $0 },
+            webView.publisher(for: \.canGoForward).receive(on: DispatchQueue.main).sink { [weak self] in self?.canGoForward = $0 },
         ]
     }
 
