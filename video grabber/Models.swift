@@ -116,6 +116,35 @@ nonisolated enum CookieBrowser: String, CaseIterable, Identifiable, Codable, Sen
         case .safari:  return "Safari"
         }
     }
+
+    var bundleID: String {
+        switch self {
+        case .chrome:  return "com.google.Chrome"
+        case .brave:   return "com.brave.Browser"
+        case .edge:    return "com.microsoft.edgemac"
+        case .firefox: return "org.mozilla.firefox"
+        case .safari:  return "com.apple.Safari"
+        }
+    }
+
+    /// Where the browser keeps its profiles (and cookies).
+    var dataDirectory: String {
+        let support = NSHomeDirectory() + "/Library/Application Support/"
+        switch self {
+        case .chrome:  return support + "Google/Chrome"
+        case .brave:   return support + "BraveSoftware/Brave-Browser"
+        case .edge:    return support + "Microsoft Edge"
+        case .firefox: return support + "Firefox/Profiles"
+        case .safari:  return NSHomeDirectory() + "/Library/Containers/com.apple.Safari/Data/Library/Cookies"
+        }
+    }
+
+    var isChromium: Bool { self == .chrome || self == .brave || self == .edge }
+
+    /// yt-dlp's BROWSER[:PROFILE] argument.
+    func specification(profile: String) -> String {
+        profile.isEmpty || self == .safari ? rawValue : "\(rawValue):\(profile)"
+    }
 }
 
 nonisolated enum SubtitleMode: String, CaseIterable, Identifiable, Codable, Sendable {

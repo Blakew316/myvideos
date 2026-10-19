@@ -39,6 +39,8 @@ final class Preferences {
     var cookieSource: CookieSource { didSet { save(cookieSource.rawValue, Keys.cookieSource) } }
     var cookieBrowser: CookieBrowser { didSet { save(cookieBrowser.rawValue, Keys.cookieBrowser) } }
     var cookieFilePath: String { didSet { save(cookieFilePath, Keys.cookieFile) } }
+    /// A specific browser profile ("Profile 4"); empty means the most recently used one.
+    var cookieBrowserProfile: String { didSet { save(cookieBrowserProfile, Keys.cookieProfile) } }
     var notificationsEnabled: Bool { didSet { save(notificationsEnabled, Keys.notifications) } }
     var clipboardDetection: Bool { didSet { save(clipboardDetection, Keys.clipboard) } }
     var showMenuBarExtra: Bool { didSet { save(showMenuBarExtra, Keys.menuBar) } }
@@ -69,6 +71,7 @@ final class Preferences {
         static let cookieSource = "cookieSource"
         static let cookieBrowser = "cookieBrowser"
         static let cookieFile = "cookieFilePath"
+        static let cookieProfile = "cookieBrowserProfile"
         static let subtitles = "subtitles"
         static let subtitleLanguage = "subtitleLanguage"
         static let embedArtwork = "embedArtwork"
@@ -125,6 +128,7 @@ final class Preferences {
         cookieSource = value(Keys.cookieSource, .none)
         cookieBrowser = value(Keys.cookieBrowser, .chrome)
         cookieFilePath = d.string(forKey: Keys.cookieFile) ?? ""
+        cookieBrowserProfile = d.string(forKey: Keys.cookieProfile) ?? ""
         notificationsEnabled = bool(Keys.notifications, true)
         clipboardDetection = bool(Keys.clipboard, true)
         showMenuBarExtra = bool(Keys.menuBar, true)

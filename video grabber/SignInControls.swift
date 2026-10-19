@@ -25,6 +25,9 @@ struct SignInControls: View {
                 }
                 if prefs.cookieSource == .browser {
                     FormRow(title: "Browser", systemImage: "safari.fill", color: .teal) { browserPicker }
+                    if !model.signIn.profiles.isEmpty {
+                        FormRow(title: "Profile", systemImage: "person.2.fill", color: .blue) { profilePicker }
+                    }
                 }
                 if prefs.cookieSource != .none {
                     statusRow.padding(.horizontal, 12).padding(.vertical, 10)
@@ -34,6 +37,9 @@ struct SignInControls: View {
                     LabeledContent("Sign in using") { sourcePicker }
                     if prefs.cookieSource == .browser {
                         LabeledContent("Browser") { browserPicker }
+                        if !model.signIn.profiles.isEmpty {
+                            LabeledContent("Profile") { profilePicker }
+                        }
                     }
                     if prefs.cookieSource != .none { statusRow }
                 } footer: {
@@ -63,9 +69,26 @@ struct SignInControls: View {
             get: { prefs.cookieBrowser },
             set: { browser in
                 prefs.cookieBrowser = browser
-                Task { await model.signIn.check(prefs: prefs, toolchain: model.toolchain, readBrowser: true) }
+                prefs.cookieBrowserProfile = ""
+                recheck()
             })) {
             ForEach(CookieBrowser.allCases) { Text($0.displayName).tag($0) }
+        }
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    /// Browsers with several people/profiles: pick the one signed in to the site.
+    private var profilePicker: some View {
+        Picker("Profile", selection: Binding(
+            get: { prefs.cookieBrowserProfile },
+            set: { profile in
+                prefs.cookieBrowserProfile = profile
+                recheck()
+            })) {
+            Text("Most Recently Used").tag("")
+            Divider()
+            ForEach(model.signIn.profiles) { Text($0.name).tag($0.id) }
         }
         .labelsHidden()
         .fixedSize()
@@ -129,10 +152,13 @@ struct SignInControls: View {
         case (.chooseFile, _), (.none, .file):
             Button(fix == .chooseFile ? "Choose File…" : "Change…", action: chooseFile)
         case (.fullDiskAccess, _):
-            HStack {
-                Button("Open Settings") { SignInStatus.openFullDiskAccess() }
-                Button("Check Again") { recheck() }
+            VStack(alignment: .trailing, spacing: 6) {
+                Button("Open Full Disk Access") { SignInStatus.openFullDiskAccess() }
+                Button("Reopen My Videos") { SignInStatus.relaunch() }
+                    .help("macOS applies Full Disk Access after the app reopens")
             }
+        case (.useBuiltIn, _):
+            Button("Use My Videos Sign-In") { choose(.builtIn) }
         case (.retry, _), (.none, .browser):
             Button(fix == .retry ? "Check Again" : "Refresh") { recheck() }
         default:

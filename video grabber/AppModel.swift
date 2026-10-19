@@ -844,7 +844,7 @@ final class AppModel {
             if let file = await signIn.browserCookiesForDownload(prefs: prefs, toolchain: toolchain) {
                 return ["--cookies", file.path]
             }
-            return ["--cookies-from-browser", options.cookieBrowser.rawValue]
+            return ["--cookies-from-browser", options.cookieBrowser.specification(profile: prefs.cookieBrowserProfile)]
         case .builtIn:
             guard let file = await SignInSession.exportCookies() else { return [] }
             return ["--cookies", file.path]

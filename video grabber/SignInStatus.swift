@@ -52,8 +52,17 @@ final class SignInStatus {
     }
 
     enum Fix: Equatable {
-        case none, signIn, chooseFile, fullDiskAccess, retry
+        case none, signIn, chooseFile, fullDiskAccess, retry, useBuiltIn
     }
+
+    /// A browser profile, e.g. ("Profile 4", "Justin — justin@example.com").
+    struct Profile: Identifiable, Equatable, Sendable {
+        let id: String
+        let name: String
+    }
+
+    /// Profiles of the chosen browser (empty if it has just one, or can't be read yet).
+    private(set) var profiles: [Profile] = []
 
     private(set) var state: State = .notNeeded
     private var serial = 0
@@ -78,14 +87,22 @@ final class SignInStatus {
         case .file:
             state = Self.checkFile(prefs.cookieFilePath)
         case .browser:
-            if !readBrowser, let cached = Self.cachedBrowserSites(for: prefs.cookieBrowser) {
-                state = cached.isEmpty
-                    ? .problem("No sign-ins found in \(prefs.cookieBrowser.displayName). Sign in to the site there first.", .retry)
-                    : .ready(cached)
+            let browser = prefs.cookieBrowser
+            profiles = Self.profiles(of: browser)
+            if !prefs.cookieBrowserProfile.isEmpty, !profiles.contains(where: { $0.id == prefs.cookieBrowserProfile }) {
+                prefs.cookieBrowserProfile = ""
+            }
+            if let problem = Self.accessProblem(browser) {
+                state = problem
+                return
+            }
+            let spec = browser.specification(profile: prefs.cookieBrowserProfile)
+            if !readBrowser, let cached = Self.cachedBrowserSites(for: spec) {
+                state = cached.isEmpty ? Self.noSignIns(browser, profiles: profiles) : .ready(cached)
                 return
             }
             state = .checking
-            let result = await Self.exportBrowser(prefs.cookieBrowser, toolchain: toolchain)
+            let result = await Self.exportBrowser(browser, spec: spec, profiles: profiles, toolchain: toolchain)
             guard mine == serial else { return }
             state = result
         }
@@ -103,9 +120,9 @@ final class SignInStatus {
         return sites.isEmpty ? .problem("That file has no sign-ins. Export it while you’re signed in.", .chooseFile) : .ready(sites)
     }
 
-    private static func cachedBrowserSites(for browser: CookieBrowser) -> [String]? {
+    private static func cachedBrowserSites(for spec: String) -> [String]? {
         let defaults = UserDefaults.standard
-        guard defaults.string(forKey: browserKey) == browser.rawValue,
+        guard defaults.string(forKey: browserKey) == spec,
               let exported = defaults.object(forKey: exportedKey) as? Date,
               Date().timeIntervalSince(exported) < 12 * 3600,
               let text = try? String(contentsOf: browserCookieFile, encoding: .utf8) else { return nil }
@@ -114,47 +131,107 @@ final class SignInStatus {
 
     /// The cookies.txt downloads should use for the browser method, re-reading the browser if stale.
     func browserCookiesForDownload(prefs: Preferences, toolchain: Toolchain) async -> URL? {
-        if Self.cachedBrowserSites(for: prefs.cookieBrowser) == nil {
+        let spec = prefs.cookieBrowser.specification(profile: prefs.cookieBrowserProfile)
+        if Self.cachedBrowserSites(for: spec) == nil {
+            if let problem = Self.accessProblem(prefs.cookieBrowser) {
+                state = problem
+                return nil
+            }
             state = .checking
-            state = await Self.exportBrowser(prefs.cookieBrowser, toolchain: toolchain)
+            state = await Self.exportBrowser(prefs.cookieBrowser, spec: spec, profiles: profiles, toolchain: toolchain)
         }
         return FileManager.default.fileExists(atPath: Self.browserCookieFile.path) ? Self.browserCookieFile : nil
     }
 
+    /// Installed? Readable? Checked before running yt-dlp, which can't tell "blocked by macOS"
+    /// from "not there" (both look like an empty folder to it).
+    static func accessProblem(_ browser: CookieBrowser) -> State? {
+        if browser != .safari, NSWorkspace.shared.urlForApplication(withBundleIdentifier: browser.bundleID) == nil {
+            return .problem("\(browser.displayName) isn’t installed on this Mac.", .useBuiltIn)
+        }
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: browser.dataDirectory)
+            return nil
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return .problem("\(browser.displayName) hasn’t been used on this Mac yet. Open it and sign in first.", .retry)
+        } catch {
+            return .problem("macOS is blocking My Videos from reading \(browser.displayName)’s sign-ins. Turn on My Videos in Full Disk Access, then reopen My Videos.", .fullDiskAccess)
+        }
+    }
+
+    /// Chrome-style profiles from "Local State", named the way the browser shows them.
+    static func profiles(of browser: CookieBrowser) -> [Profile] {
+        let fm = FileManager.default
+        if browser.isChromium {
+            let localState = browser.dataDirectory + "/Local State"
+            guard let data = fm.contents(atPath: localState),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let cache = (json["profile"] as? [String: Any])?["info_cache"] as? [String: [String: Any]] else { return [] }
+            let profiles = cache.map { id, info -> Profile in
+                let name = (info["name"] as? String) ?? id
+                let email = (info["user_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                return Profile(id: id, name: email.map { "\(name) — \($0)" } ?? name)
+            }
+            return profiles.count > 1 ? profiles.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : []
+        }
+        if browser == .firefox {
+            let dirs = (try? fm.contentsOfDirectory(atPath: browser.dataDirectory)) ?? []
+            let profiles = dirs.filter { !$0.hasPrefix(".") }.sorted().map {
+                Profile(id: $0, name: $0.split(separator: ".", maxSplits: 1).last.map(String.init) ?? $0)
+            }
+            return profiles.count > 1 ? profiles : []
+        }
+        return []
+    }
+
+    private static func noSignIns(_ browser: CookieBrowser, profiles: [Profile]) -> State {
+        .problem(profiles.isEmpty
+                 ? "No sign-ins found in \(browser.displayName). Sign in to the site there, then check again."
+                 : "No sign-ins found in this \(browser.displayName) profile. Choose the profile you use for the site.",
+                 .retry)
+    }
+
     /// Asks yt-dlp to read the browser's cookies (offline) and save them as a private cookies.txt.
-    private static func exportBrowser(_ browser: CookieBrowser, toolchain: Toolchain) async -> State {
+    private static func exportBrowser(_ browser: CookieBrowser, spec: String, profiles: [Profile],
+                                      toolchain: Toolchain) async -> State {
         guard let tool = toolchain.ytdlp else { return .problem("yt-dlp isn’t installed.", .none) }
         let file = browserCookieFile
         try? FileManager.default.removeItem(at: file)
         // An unresolvable address: yt-dlp loads the cookies, saves them, then stops — nothing is sent anywhere.
-        let args = ["--cookies-from-browser", browser.rawValue, "--cookies", file.path,
+        let args = ["--cookies-from-browser", spec, "--cookies", file.path,
                     "--simulate", "--no-warnings", "--socket-timeout", "5", "--", "https://localhost.invalid/check"]
         let output = try? await ProcessRunner.run(tool, args)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        let log = ((output?.stderr ?? "") + (output?.stdoutText ?? ""))
+        let log = (output?.stderr ?? "") + (output?.stdoutText ?? "")
         let lower = log.lowercased()
 
         if lower.contains("extracted"), let text = try? String(contentsOf: file, encoding: .utf8) {
-            UserDefaults.standard.set(browser.rawValue, forKey: browserKey)
+            UserDefaults.standard.set(spec, forKey: browserKey)
             UserDefaults.standard.set(Date(), forKey: exportedKey)
             let sites = CookieSites.sites(inCookieFile: text)
-            return sites.isEmpty
-                ? .problem("No sign-ins found in \(browser.displayName). Sign in to the site there, then check again.", .retry)
-                : .ready(sites)
+            return sites.isEmpty ? noSignIns(browser, profiles: profiles) : .ready(sites)
         }
         try? FileManager.default.removeItem(at: file)
-        if browser == .safari && (lower.contains("operation not permitted") || lower.contains("permission")) {
-            return .problem("macOS needs to allow My Videos to read Safari’s sign-ins: turn on My Videos in Full Disk Access.", .fullDiskAccess)
+        if lower.contains("operation not permitted") || lower.contains("permission") || lower.contains("could not find") {
+            return .problem("macOS is blocking My Videos from reading \(browser.displayName)’s sign-ins. Turn on My Videos in Full Disk Access, then reopen My Videos.", .fullDiskAccess)
         }
-        if lower.contains("keychain") || lower.contains("safe storage") || lower.contains("decrypt") {
-            return .problem("\(browser.displayName)’s sign-ins are locked. Check again and choose “Always Allow” when macOS asks.", .retry)
-        }
-        if lower.contains("could not find") || lower.contains("no such file") || lower.contains("not installed") {
-            return .problem("\(browser.displayName) doesn’t seem to be installed or set up on this Mac.", .none)
+        if lower.contains("find-generic-password") || lower.contains("keychain") || lower.contains("safe storage")
+            || lower.contains("decrypt") {
+            return .problem("\(browser.displayName)’s sign-ins are locked. Check again and click “Always Allow” when macOS asks for “\(browser.displayName) Safe Storage”.", .retry)
         }
         let lastError = log.split(separator: "\n").last { $0.contains("ERROR") }.map(String.init)?
             .replacingOccurrences(of: "ERROR: ", with: "") ?? "Couldn’t read \(browser.displayName)’s sign-ins."
         return .problem(lastError, .retry)
+    }
+
+    /// Quits and reopens My Videos — macOS applies a new Full Disk Access setting only to a fresh launch.
+    static func relaunch() {
+        let path = Bundle.main.bundlePath
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 
     static func openFullDiskAccess() {
