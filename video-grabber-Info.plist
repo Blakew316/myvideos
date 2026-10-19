@@ -51,7 +51,7 @@
 		</dict>
 	</array>
 	<key>SUFeedURL</key>
-	<string></string>
+	<string>https://blakew316.github.io/myvideos/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string></string>
 	<key>SUEnableInstallerLauncherService</key>

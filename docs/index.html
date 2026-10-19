@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Videos for Mac</title>
+<meta name="description" content="Save videos and music from across the web — beautifully, on your Mac.">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #fbfbfd; --text: #1d1d1f; --muted: #6e6e73; --card: rgba(0,0,0,.035); --line: rgba(0,0,0,.08);
+    --accent: #0071e3; --glow: rgba(97,102,242,.16);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --text: #f5f5f7; --muted: #a1a1a6; --card: rgba(255,255,255,.06); --line: rgba(255,255,255,.1);
+            --accent: #2997ff; --glow: rgba(97,102,242,.28); }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 17px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  .hero { text-align: center; padding: 96px 16px 64px;
+          background: radial-gradient(60% 50% at 50% 0%, var(--glow), transparent 70%); }
+  .hero img { width: 128px; height: 128px; filter: drop-shadow(0 18px 30px rgba(0,0,0,.25)); }
+  h1 { font: 700 clamp(40px, 7vw, 64px)/1.05 -apple-system, "SF Pro Display", sans-serif; letter-spacing: -.02em; margin-top: 24px; }
+  .tagline { font-size: clamp(19px, 2.6vw, 24px); color: var(--muted); margin-top: 12px; }
+  .cta { display: inline-block; margin-top: 32px; background: var(--accent); color: #fff; text-decoration: none;
+         font-weight: 600; padding: 12px 26px; border-radius: 980px; }
+  .cta:hover { filter: brightness(1.08); }
+  .req { color: var(--muted); font-size: 14px; margin-top: 14px; }
+  .grid { max-width: 980px; margin: 0 auto; padding: 24px 16px 80px; display: grid; gap: 16px;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 24px; }
+  .card .icon { font-size: 26px; }
+  .card h3 { font-size: 19px; margin-top: 10px; }
+  .card p { color: var(--muted); font-size: 15px; margin-top: 6px; }
+  footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 16px 48px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+  <section class="hero">
+    <img src="icon.png" alt="My Videos app icon">
+    <h1>My Videos</h1>
+    <p class="tagline">Save videos and music from across the web.</p>
+    <a class="cta" href="https://github.com/Blakew316/myvideos/releases/latest">Download for Mac</a>
+    <p class="req">Requires macOS 27 · Free</p>
+  </section>
+  <section class="grid">
+    <div class="card"><div class="icon">⬇️</div><h3>Almost any site</h3><p>Paste a link from YouTube, Vimeo and thousands more — a video, a song or a whole playlist.</p></div>
+    <div class="card"><div class="icon">📡</div><h3>Subscriptions</h3><p>Follow a channel and new uploads download on their own.</p></div>
+    <div class="card"><div class="icon">🎵</div><h3>Apple Music, done right</h3><p>Songs arrive with title, artist, cover art and lyrics.</p></div>
+    <div class="card"><div class="icon">✂️</div><h3>Just the part you want</h3><p>Trim to a clip, skip sponsor segments, add subtitles.</p></div>
+    <div class="card"><div class="icon">🪄</div><h3>Convert anything</h3><p>Turn any file into AAC, MP3, a smaller video or a GIF.</p></div>
+    <div class="card"><div class="icon">☁️</div><h3>Everywhere you are</h3><p>Menu bar, Share menu, Shortcuts, Siri — and iCloud sync across your Macs.</p></div>
+  </section>
+  <footer>Download only content you have the right to save. · <a href="https://github.com/Blakew316/myvideos">Source on GitHub</a></footer>
+</body>
+</html>
