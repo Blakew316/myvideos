@@ -10,11 +10,11 @@ import Observation
 @Observable
 final class DownloadJob: Identifiable {
     enum Phase: Equatable {
-        case queued, preparing, downloading, processing, finished, failed, cancelled
+        case queued, preparing, downloading, processing, paused, finished, failed, cancelled
     }
 
     enum MusicState: Equatable {
-        case none, adding, added, failed(String)
+        case none, findingLyrics, adding, added, failed(String)
     }
 
     let id = UUID()
@@ -22,6 +22,9 @@ final class DownloadJob: Identifiable {
     let options: DownloadOptions
     var info: MediaInfo?
     var tags: MusicTags
+    /// Set for uploads downloaded automatically from a subscription.
+    var subscriptionID: UUID?
+    var feedEntryID: String?
     let createdAt = Date()
 
     private(set) var phase: Phase = .queued
@@ -34,9 +37,12 @@ final class DownloadJob: Identifiable {
     private(set) var savedFiles: [URL] = []
     private(set) var errorMessage: String?
     var musicState: MusicState = .none
+    /// How many songs got lyrics written into them.
+    var lyricsCount = 0
 
     var isActive: Bool { phase == .preparing || phase == .downloading || phase == .processing }
     var isDone: Bool { phase == .finished || phase == .failed || phase == .cancelled }
+    var isWaiting: Bool { phase == .queued || phase == .paused }
 
     var displayTitle: String {
         if let title = info?.title, !title.isEmpty { return title }
@@ -56,6 +62,7 @@ final class DownloadJob: Identifiable {
     // Internals
     private var process: StreamingProcess?
     private var cancelRequested = false
+    private var pauseRequested = false
     private var lastError = ""
     private var printFile: URL?
     private var streamCount = 1
@@ -121,8 +128,27 @@ final class DownloadJob: Identifiable {
         log("$ yt-dlp \(args.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " "))")
     }
 
-    func cancel() {
+    /// Stops the transfer but keeps the partial file; resuming picks up where it left off.
+    func pause() {
         if phase == .queued {
+            phase = .paused
+            statusLine = "Paused"
+            return
+        }
+        guard let process, process.isRunning else { return }
+        pauseRequested = true
+        statusLine = "Pausing…"
+        process.terminate()
+    }
+
+    func resume() {
+        guard phase == .paused else { return }
+        phase = .queued
+        statusLine = "Waiting…"
+    }
+
+    func cancel() {
+        if phase == .queued || phase == .paused {
             phase = .cancelled
             statusLine = "Cancelled"
             return
@@ -151,9 +177,11 @@ final class DownloadJob: Identifiable {
         errorMessage = nil
         lastError = ""
         cancelRequested = false
+        pauseRequested = false
         streamCount = 1
         streamIndex = -1
         musicState = .none
+        lyricsCount = 0
     }
 
     // MARK: - Output parsing
@@ -271,6 +299,13 @@ final class DownloadJob: Identifiable {
             self.printFile = nil
         }
 
+        if pauseRequested && !cancelRequested {
+            pauseRequested = false
+            phase = .paused
+            statusLine = progressIsIndeterminate ? "Paused" : "Paused at \(Int(progress * 100))%"
+            completion()
+            return
+        }
         if cancelRequested || (signalled && (status == SIGTERM || status == SIGKILL)) {
             phase = .cancelled
             statusLine = "Cancelled"

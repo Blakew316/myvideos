@@ -16,13 +16,9 @@ struct ContentView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            switch model.selection ?? .download {
-            case .download: ComposerView(model: model)
-            case .queue:    QueueView(model: model)
-            case .history:  HistoryView(model: model)
-            }
+            detail
         }
-        .frame(minWidth: 760, minHeight: 600)
+        .frame(minWidth: 820, minHeight: 620)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -40,6 +36,9 @@ struct ContentView: View {
         .sheet(isPresented: $model.showOnboarding) {
             OnboardingView(model: model)
         }
+        .sheet(item: $model.subscribeRequest) { request in
+            SubscribeSheet(model: model, link: request.link)
+        }
         .alert(item: $model.alert) { alert in
             if alert.showsAutomationButton {
                 Alert(title: Text(alert.title), message: Text(alert.message),
@@ -51,21 +50,76 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.checkClipboard()
+            if model.prefs.iCloudSync { Task { await model.sync.sync(model: model) } }
         }
         .onAppear { model.checkClipboard() }
     }
 
+    @ViewBuilder
+    private var detail: some View {
+        switch model.selection ?? .download {
+        case .download:            ComposerView(model: model)
+        case .queue:               QueueView(model: model)
+        case .history:             HistoryView(model: model)
+        case .convert:             ConvertView(model: model)
+        case .subscriptions:       SubscriptionsOverview(model: model)
+        case .subscription(let id): SubscriptionDetailView(model: model, id: id).id(id)
+        }
+    }
+
     private var sidebar: some View {
         List(selection: $model.selection) {
-            Label("Download", systemImage: "arrow.down.circle")
-                .tag(SidebarItem.download)
-            Label("Queue", systemImage: "list.bullet.rectangle")
-                .badge(model.pendingCount)
-                .tag(SidebarItem.queue)
-            Label("History", systemImage: "clock")
-                .tag(SidebarItem.history)
+            Section("Library") {
+                Label("Download", systemImage: "arrow.down.circle")
+                    .tag(SidebarItem.download)
+                Label("Queue", systemImage: "list.bullet.rectangle")
+                    .badge(model.pendingCount)
+                    .tag(SidebarItem.queue)
+                Label("History", systemImage: "clock")
+                    .tag(SidebarItem.history)
+            }
+
+            Section {
+                Label("All Subscriptions", systemImage: "dot.radiowaves.left.and.right")
+                    .badge(model.subscriptions.items.reduce(0) { $0 + $1.unseenCount })
+                    .tag(SidebarItem.subscriptions)
+                ForEach(model.subscriptions.items) { sub in
+                    Label {
+                        Text(sub.title).lineLimit(1)
+                    } icon: {
+                        ChannelAvatar(url: sub.avatarURL, title: sub.title, size: 18)
+                    }
+                    .badge(sub.unseenCount)
+                    .opacity(sub.isEnabled ? 1 : 0.55)
+                    .tag(SidebarItem.subscription(sub.id))
+                    .contextMenu {
+                        Button("Check Now") { Task { await model.checkSubscription(sub.id) } }
+                        Divider()
+                        Button("Unsubscribe", role: .destructive) { model.unsubscribe(sub.id) }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Subscriptions")
+                    Spacer()
+                    Button {
+                        model.subscribeRequest = .init(link: "")
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Add Subscription")
+                    .accessibilityLabel("Add Subscription")
+                }
+            }
+
+            Section("Tools") {
+                Label("Convert", systemImage: "wand.and.sparkles")
+                    .badge(model.stagedFiles.count + model.conversions.filter { $0.phase == .waiting || $0.phase == .converting }.count)
+                    .tag(SidebarItem.convert)
+            }
         }
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
         .safeAreaInset(edge: .bottom) {
             if let job = model.activeJob, model.selection != .queue {
                 SidebarActivity(job: job, remaining: model.pendingCount) {
@@ -76,6 +130,7 @@ struct ContentView: View {
             }
         }
         .animation(.smooth(duration: 0.3), value: model.activeJob?.id)
+        .animation(.smooth(duration: 0.3), value: model.subscriptions.items.map(\.id))
     }
 }
 
@@ -138,7 +193,7 @@ private struct ActivityInspector: View {
             Divider()
             if log.isEmpty {
                 ContentUnavailableView("No Activity Yet", systemImage: "text.alignleft",
-                                       description: Text("Technical details from yt-dlp appear here while downloads run."))
+                                       description: Text("Technical details from yt-dlp and ffmpeg appear here while they run."))
             } else {
                 ScrollView {
                     Text(log)

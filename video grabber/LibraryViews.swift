@@ -5,11 +5,15 @@
 
 import SwiftUI
 import AppKit
+import QuickLook
 
 // MARK: - Queue
 
 struct QueueView: View {
     @Bindable var model: AppModel
+
+    private var inProgress: [DownloadJob] { model.jobs.filter(\.isActive) }
+    private var finished: [DownloadJob] { model.jobs.filter(\.isDone).reversed() }
 
     var body: some View {
         Group {
@@ -24,9 +28,29 @@ struct QueueView: View {
                 }
             } else {
                 List {
-                    ForEach(model.jobs) { job in
-                        JobRow(job: job, model: model)
-                            .listRowSeparator(.visible)
+                    if !inProgress.isEmpty {
+                        Section("Downloading") {
+                            ForEach(inProgress) { JobRow(job: $0, model: model) }
+                        }
+                    }
+                    if !model.upNext.isEmpty {
+                        Section {
+                            ForEach(model.upNext) { JobRow(job: $0, model: model) }
+                                .onMove { model.moveUpNext(from: $0, to: $1) }
+                        } header: {
+                            Text("Up Next")
+                        } footer: {
+                            if model.upNext.count > 1 {
+                                Text("Drag to change the order.")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    if !finished.isEmpty {
+                        Section("Finished") {
+                            ForEach(finished) { JobRow(job: $0, model: model) }
+                        }
                     }
                 }
                 .listStyle(.inset)
@@ -35,9 +59,25 @@ struct QueueView: View {
         }
         .background(WindowBackdrop())
         .navigationTitle("Queue")
-        .navigationSubtitle(queueSubtitle)
+        .navigationSubtitle(subtitle)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if model.pausedCount > 0 && model.pendingCount == 0 {
+                    Button {
+                        model.resumeAll()
+                    } label: {
+                        Label("Resume All", systemImage: "play.fill")
+                    }
+                    .help("Resume all paused downloads")
+                } else {
+                    Button {
+                        model.pauseAll()
+                    } label: {
+                        Label("Pause All", systemImage: "pause.fill")
+                    }
+                    .help("Pause all downloads")
+                    .disabled(model.pendingCount == 0)
+                }
                 Button {
                     model.clearFinished()
                 } label: {
@@ -48,23 +88,28 @@ struct QueueView: View {
             }
         }
         .animation(.smooth(duration: 0.3), value: model.jobs.map(\.id))
+        .animation(.smooth(duration: 0.3), value: model.jobs.map(\.phase))
     }
 
-    private var queueSubtitle: String {
-        let pending = model.pendingCount
-        return pending == 0 ? "" : "\(pending) remaining"
+    private var subtitle: String {
+        var parts: [String] = []
+        if model.pendingCount > 0 { parts.append("\(model.pendingCount) remaining") }
+        if model.pausedCount > 0 { parts.append("\(model.pausedCount) paused") }
+        return parts.joined(separator: ", ")
     }
 }
 
 struct JobRow: View {
     let job: DownloadJob
     let model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 14) {
             Thumbnail(url: job.info?.thumbnailURL, isAudio: job.options.isAudio, cornerRadius: 6)
                 .frame(width: 96)
                 .overlay(alignment: .bottomTrailing) { musicBadge }
+                .opacity(job.phase == .paused ? 0.6 : 1)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(job.displayTitle)
@@ -90,20 +135,24 @@ struct JobRow: View {
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if job.phase == .finished, let file = job.savedFiles.first { NSWorkspace.shared.open(file) }
-        }
+        .onTapGesture(count: 2) { openFile() }
         .contextMenu { menu }
         .accessibilityElement(children: .combine)
     }
 
     private var statusText: String {
+        var text = job.statusLine
         switch job.musicState {
-        case .adding: return job.statusLine + " · Adding to Apple Music…"
-        case .added: return job.statusLine + " · Added to Apple Music"
-        case .failed(let message): return job.statusLine + " · " + message
-        case .none: return job.statusLine
+        case .findingLyrics: text += " · Finding lyrics…"
+        case .adding: text += " · Adding to Apple Music…"
+        case .added: text += " · Added to Apple Music"
+        case .failed(let message): text += " · " + message
+        case .none: break
         }
+        if job.lyricsCount > 0, job.musicState != .findingLyrics {
+            text += job.lyricsCount == 1 ? " · Lyrics added" : " · Lyrics added to \(job.lyricsCount) songs"
+        }
+        return text
     }
 
     @ViewBuilder
@@ -111,21 +160,38 @@ struct JobRow: View {
         if job.musicState == .added {
             IconTile(systemImage: "music.note", color: .pink, size: 18)
                 .padding(4)
+        } else if job.phase == .paused {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(.white, .black.opacity(0.5))
+                .padding(4)
         }
+    }
+
+    private func openFile() {
+        guard job.phase == .finished, let file = job.savedFiles.first else { return }
+        if MediaPlayer.canPlay(file) { openWindow(value: file) } else { NSWorkspace.shared.open(file) }
     }
 
     @ViewBuilder
     private var actions: some View {
         HStack(spacing: 6) {
             switch job.phase {
-            case .queued, .preparing, .downloading, .processing:
+            case .preparing, .downloading, .processing:
+                circleButton("pause.fill", help: "Pause") { model.pause(job) }
                 circleButton("xmark", help: "Stop") { model.cancel(job) }
+            case .queued:
+                circleButton("pause.fill", help: "Pause") { model.pause(job) }
+                circleButton("xmark", help: "Remove") { model.remove(job) }
+            case .paused:
+                circleButton("play.fill", help: "Resume") { model.resume(job) }
+                circleButton("xmark", help: "Remove") { model.remove(job) }
             case .failed, .cancelled:
                 circleButton("arrow.clockwise", help: "Try Again") { model.retry(job) }
                 circleButton("xmark", help: "Remove") { model.remove(job) }
             case .finished:
-                if let file = job.savedFiles.first, job.savedFiles.count == 1 {
-                    circleButton("play.fill", help: "Open") { NSWorkspace.shared.open(file) }
+                if job.savedFiles.count == 1 {
+                    circleButton("play.fill", help: "Play", action: openFile)
                 }
                 circleButton("magnifyingglass", help: "Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting(job.savedFiles)
@@ -149,14 +215,19 @@ struct JobRow: View {
     @ViewBuilder
     private var menu: some View {
         if job.phase == .finished {
-            if let file = job.savedFiles.first {
-                Button("Open") { NSWorkspace.shared.open(file) }
+            if job.savedFiles.first != nil {
+                Button("Play", action: openFile)
+                Button("Open With Default App") { job.savedFiles.first.map { _ = NSWorkspace.shared.open($0) } }
             }
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(job.savedFiles) }
             Divider()
         }
         if job.isActive || job.phase == .queued {
+            Button("Pause") { model.pause(job) }
             Button("Stop") { model.cancel(job) }
+        }
+        if job.phase == .paused {
+            Button("Resume") { model.resume(job) }
         }
         if job.phase == .failed || job.phase == .cancelled {
             Button("Try Again") { model.retry(job) }
@@ -175,15 +246,27 @@ struct JobRow: View {
 struct HistoryView: View {
     @Bindable var model: AppModel
     @State private var search = ""
+    @State private var filter: Filter = .all
     @State private var selection = Set<HistoryItem.ID>()
     @State private var confirmClear = false
+    @State private var quickLookURL: URL?
+    @Environment(\.openWindow) private var openWindow
+
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All", videos = "Videos", music = "Music"
+        var id: String { rawValue }
+    }
 
     private var items: [HistoryItem] {
-        let all = model.history.items
-        guard !search.isEmpty else { return all }
-        return all.filter {
-            $0.title.localizedCaseInsensitiveContains(search) ||
-            ($0.uploader?.localizedCaseInsensitiveContains(search) ?? false)
+        model.history.items.filter { item in
+            switch filter {
+            case .all: break
+            case .videos: if item.isAudio { return false }
+            case .music: if !item.isAudio { return false }
+            }
+            guard !search.isEmpty else { return true }
+            return item.title.localizedCaseInsensitiveContains(search)
+                || (item.uploader?.localizedCaseInsensitiveContains(search) ?? false)
         }
     }
 
@@ -212,15 +295,27 @@ struct HistoryView: View {
                 .contextMenu(forSelectionType: HistoryItem.ID.self) { ids in
                     menu(for: ids)
                 } primaryAction: { ids in
-                    open(ids)
+                    play(ids)
                 }
                 .onDeleteCommand { model.history.remove(ids: selection) }
+                .onKeyPress(.space) {
+                    toggleQuickLook()
+                    return .handled
+                }
+                .quickLookPreview($quickLookURL, in: existingFiles(selection))
             }
         }
         .background(WindowBackdrop())
         .navigationTitle("History")
         .searchable(text: $search, placement: .toolbar, prompt: "Search Downloads")
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Show", selection: $filter) {
+                    ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     confirmClear = true
@@ -268,25 +363,58 @@ struct HistoryView: View {
             .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    private func open(_ ids: Set<HistoryItem.ID>) {
+    private func toggleQuickLook() {
+        if quickLookURL != nil {
+            quickLookURL = nil
+        } else {
+            quickLookURL = existingFiles(selection).first
+        }
+    }
+
+    /// Double-click: play in the built-in player when possible, otherwise open normally.
+    private func play(_ ids: Set<HistoryItem.ID>) {
         let files = existingFiles(ids)
         if files.isEmpty, let item = ids.first.flatMap(model.history.item(id:)) {
-            model.alert = AppModel.AppAlert(title: "File Not Found",
-                                            message: "“\(item.title)” has been moved or deleted. You can download it again from the context menu.")
+            let elsewhere = item.deviceName.map { $0 != AppModel.deviceName } ?? false
+            model.alert = AppModel.AppAlert(
+                title: elsewhere ? "Downloaded on Another Mac" : "File Not Found",
+                message: elsewhere
+                    ? "“\(item.title)” was downloaded on \(item.deviceName ?? "another Mac"). You can download it again here from the context menu."
+                    : "“\(item.title)” has been moved or deleted. You can download it again from the context menu.")
+            return
         }
-        files.prefix(10).forEach { NSWorkspace.shared.open($0) }
+        for file in files.prefix(5) {
+            if MediaPlayer.canPlay(file) { openWindow(value: file) } else { NSWorkspace.shared.open(file) }
+        }
     }
 
     @ViewBuilder
     private func menu(for ids: Set<HistoryItem.ID>) -> some View {
         let items = ids.compactMap(model.history.item(id:))
+        let files = existingFiles(ids)
         if !items.isEmpty {
-            Button("Open") { open(ids) }
-            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(existingFiles(ids)) }
-                .disabled(existingFiles(ids).isEmpty)
+            Button("Play") { play(ids) }
+                .disabled(files.isEmpty)
+            Button("Quick Look") { quickLookURL = files.first }
+                .disabled(files.isEmpty)
+            Button("Open With Default App") { files.prefix(10).forEach { NSWorkspace.shared.open($0) } }
+                .disabled(files.isEmpty)
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }
+                .disabled(files.isEmpty)
             if items.count == 1, let item = items.first {
                 if item.isAudio {
                     Button("Add to Apple Music") { model.addToMusic(item) }
+                        .disabled(files.isEmpty)
+                }
+                if !files.isEmpty {
+                    Menu("Convert To") {
+                        ForEach(ConvertPreset.allCases) { preset in
+                            Button(preset.title) {
+                                model.convert(files, preset: preset)
+                                model.selection = .convert
+                            }
+                        }
+                    }
                 }
                 Divider()
                 Button("Download Again") { model.redownload(item) }
@@ -314,6 +442,11 @@ struct HistoryRow: View {
         item.fileURLs.contains { FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    private var onAnotherMac: Bool {
+        guard let device = item.deviceName else { return false }
+        return device != AppModel.deviceName && !fileExists
+    }
+
     var body: some View {
         HStack(spacing: 14) {
             Thumbnail(url: item.thumbnailURL, isAudio: item.isAudio, cornerRadius: 6)
@@ -327,7 +460,11 @@ struct HistoryRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if !fileExists {
+                if onAnotherMac {
+                    Label("On \(item.deviceName ?? "another Mac")", systemImage: "laptopcomputer")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if !fileExists {
                     Label("Moved or deleted", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)

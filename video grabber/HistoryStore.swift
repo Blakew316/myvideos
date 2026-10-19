@@ -10,6 +10,8 @@ import Observation
 @Observable
 final class HistoryStore {
     private(set) var items: [HistoryItem] = []
+    /// Removed item IDs, so iCloud sync doesn't bring them back from another Mac.
+    private(set) var tombstones: Set<UUID> = []
 
     static var supportDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -20,12 +22,16 @@ final class HistoryStore {
     }
 
     private var fileURL: URL { Self.supportDirectory.appendingPathComponent("History.json") }
+    private var tombstoneURL: URL { Self.supportDirectory.appendingPathComponent("History-Deleted.json") }
 
     init() {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         if let data = try? Data(contentsOf: fileURL) {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
             items = (try? decoder.decode([HistoryItem].self, from: data)) ?? []
+        }
+        if let data = try? Data(contentsOf: tombstoneURL) {
+            tombstones = (try? decoder.decode(Set<UUID>.self, from: data)) ?? []
         }
     }
 
@@ -36,10 +42,12 @@ final class HistoryStore {
 
     func remove(ids: Set<HistoryItem.ID>) {
         items.removeAll { ids.contains($0.id) }
+        tombstones.formUnion(ids)
         save()
     }
 
     func clear() {
+        tombstones.formUnion(items.map(\.id))
         items.removeAll()
         save()
     }
@@ -48,10 +56,19 @@ final class HistoryStore {
         items.first { $0.id == id }
     }
 
-    private func save() {
+    /// Replaces everything with a merged set from iCloud sync.
+    func replace(with merged: [HistoryItem], tombstones newTombstones: Set<UUID>) {
+        guard merged != items || newTombstones != tombstones else { return }
+        items = merged
+        tombstones = newTombstones
+        save(notify: false)
+    }
+
+    private func save(notify: Bool = true) {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(items) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        if let data = try? encoder.encode(items) { try? data.write(to: fileURL, options: .atomic) }
+        if let data = try? encoder.encode(tombstones) { try? data.write(to: tombstoneURL, options: .atomic) }
+        if notify { NotificationCenter.default.post(name: .myVideosLocalDataChanged, object: nil) }
     }
 }

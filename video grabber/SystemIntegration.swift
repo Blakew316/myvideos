@@ -16,11 +16,11 @@ final class DockProgress {
     private var hostingView: NSHostingView<DockTileView>?
     private var lastDrawn: Double = -1
 
-    func update(job: DownloadJob?, badgeCount: Int) {
+    func update(jobs: [DownloadJob], badgeCount: Int) {
         let tile = NSApp.dockTile
         tile.badgeLabel = badgeCount > 1 ? "\(badgeCount)" : nil
 
-        guard let job else {
+        guard !jobs.isEmpty else {
             if hostingView != nil {
                 tile.contentView = nil
                 hostingView = nil
@@ -29,7 +29,10 @@ final class DockProgress {
             }
             return
         }
-        let progress = job.progressIsIndeterminate ? nil : job.progress
+        // Average across simultaneous downloads; indeterminate ones count as just started.
+        let known = jobs.filter { !$0.progressIsIndeterminate }
+        let progress: Double? = known.isEmpty ? nil : jobs.map { $0.progressIsIndeterminate ? 0 : $0.progress }
+            .reduce(0, +) / Double(jobs.count)
         let rounded = progress.map { ($0 * 100).rounded() / 100 } ?? -2
         guard rounded != lastDrawn || hostingView == nil else { return }
         lastDrawn = rounded

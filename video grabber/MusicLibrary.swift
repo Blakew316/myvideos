@@ -39,6 +39,7 @@ nonisolated enum MusicLibrary {
             set theTitle to item 2 of argv
             set theArtist to item 3 of argv
             set theAlbum to item 4 of argv
+            set theLyrics to item 5 of argv
             tell application "Music"
                 set newTrack to add theFile
                 if newTrack is missing value then error "Apple Music couldn’t import this file." number 1
@@ -58,6 +59,11 @@ nonisolated enum MusicLibrary {
                         set album of newTrack to theAlbum
                     end try
                 end if
+                if theLyrics is not "" then
+                    try
+                        set lyrics of newTrack to theLyrics
+                    end try
+                end if
             end tell
         end run
         """
@@ -65,13 +71,14 @@ nonisolated enum MusicLibrary {
     /// Runs through /usr/bin/osascript: NSAppleScript must only be used on the main thread
     /// (where it would freeze the UI), while a child process can be awaited without blocking.
     /// Automation permission is still attributed to My Videos, the responsible process.
-    static func add(_ file: URL, tags: MusicTags) async throws {
+    static func add(_ file: URL, tags: MusicTags, lyrics: String? = nil) async throws {
         guard canImport(file) else { throw ImportError.unsupportedFormat(file.pathExtension) }
         let output = try await ProcessRunner.run(URL(fileURLWithPath: "/usr/bin/osascript"),
                                                  ["-e", script, file.path,
                                                   tags.title.trimmingCharacters(in: .whitespacesAndNewlines),
                                                   tags.artist.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                  tags.album.trimmingCharacters(in: .whitespacesAndNewlines)])
+                                                  tags.album.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                  lyrics ?? ""])
         guard output.status != 0 else { return }
         // -1743 == errAEEventNotPermitted: Automation access to Music hasn't been granted.
         if output.stderr.contains("-1743") || output.stderr.localizedCaseInsensitiveContains("not authorized") {

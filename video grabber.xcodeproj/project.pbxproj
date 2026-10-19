@@ -23,44 +23,42 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		E1A0000000000000000000AA /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
 			dstPath = "";
-			dstSubfolderSpec = 13;
+			dstSubfolder = PlugIns;
 			files = (
 				E1A0000000000000000000AB /* My Videos Share.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		E1A0000000000000000000A1 /* My Videos Share.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "My Videos Share.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
-		E1A0000000000000000000AE /* My-Videos-Share-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "My-Videos-Share-Info.plist"; sourceTree = "<group>"; };
 		D02C2B273084A630008BDC34 /* My Videos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "My Videos.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D079751030859F97006C1D9F /* video-grabber-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "video-grabber-Info.plist"; sourceTree = "<group>"; };
+		E1A0000000000000000000A1 /* My Videos Share.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "My Videos Share.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E1A0000000000000000000AE /* My-Videos-Share-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "My-Videos-Share-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		E1A0000000000000000000A2 /* My Videos Share */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "My Videos Share";
-			sourceTree = "<group>";
-		};
 		D02C2B293084A630008BDC34 /* video grabber */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "video grabber";
 			sourceTree = "<group>";
 		};
+		E1A0000000000000000000A2 /* My Videos Share */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "My Videos Share";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		E1A0000000000000000000A4 /* Frameworks */ = {
+		D02C2B243084A630008BDC34 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 			);
 		};
-		D02C2B243084A630008BDC34 /* Frameworks */ = {
+		E1A0000000000000000000A4 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 			);
@@ -123,8 +121,6 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				E1A0000000000000000000A2 /* My Videos Share */,
 			);
@@ -172,12 +168,12 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		E1A0000000000000000000A5 /* Resources */ = {
+		D02C2B253084A630008BDC34 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
 		};
-		D02C2B253084A630008BDC34 /* Resources */ = {
+		E1A0000000000000000000A5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -185,12 +181,12 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		E1A0000000000000000000A3 /* Sources */ = {
+		D02C2B233084A630008BDC34 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
 		};
-		D02C2B233084A630008BDC34 /* Sources */ = {
+		E1A0000000000000000000A3 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -473,7 +469,6 @@
 				E1A0000000000000000000A8 /* Debug configuration for PBXNativeTarget "My Videos Share" */,
 				E1A0000000000000000000A9 /* Release configuration for PBXNativeTarget "My Videos Share" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */

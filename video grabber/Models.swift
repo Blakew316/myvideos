@@ -141,6 +141,46 @@ nonisolated enum SubtitleLanguage: String, CaseIterable, Identifiable, Codable, 
     var ytdlpCodes: String { "\(rawValue),\(rawValue)-orig" }
 }
 
+/// SponsorBlock (YouTube): community-sourced sponsor segments.
+nonisolated enum SponsorBlockMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case off, mark, remove
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .off:    return "Off"
+        case .mark:   return "Mark as Chapters"
+        case .remove: return "Remove Sponsors"
+        }
+    }
+    var arguments: [String] {
+        switch self {
+        case .off:    return []
+        case .mark:   return ["--sponsorblock-mark", "all"]
+        case .remove: return ["--sponsorblock-mark", "all", "--sponsorblock-remove", "sponsor,selfpromo,interaction"]
+        }
+    }
+}
+
+/// How downloads are sorted into folders inside the save location.
+nonisolated enum OrganizeMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case none, byType, byChannel, byTypeAndChannel
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .none:             return "Don’t Organize"
+        case .byType:           return "Music and Videos Folders"
+        case .byChannel:        return "A Folder for Each Channel"
+        case .byTypeAndChannel: return "By Type, Then Channel"
+        }
+    }
+}
+
+nonisolated enum SpeedLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
+    case unlimited = 0, one = 1, two = 2, five = 5, ten = 10, twentyFive = 25
+    var id: Int { rawValue }
+    var displayName: String { self == .unlimited ? "Unlimited" : "\(rawValue) MB/s" }
+}
+
 /// Everything that determines how one download runs, snapshotted when it's queued so
 /// changing the controls afterwards never changes a download that's already waiting.
 nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
@@ -159,8 +199,29 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
     var cookieSource: CookieSource = .none
     var cookieBrowser: CookieBrowser = .chrome
     var cookieFilePath = ""
+    var sponsorBlock: SponsorBlockMode = .off
+    var organize: OrganizeMode = .none
+    var speedLimit: SpeedLimit = .unlimited
+    var fetchLyrics = true
+    /// Fixed folder inside the destination (subscriptions save into one per channel).
+    var subfolder: String?
 
     var isAudio: Bool { quality == .audio }
+
+    /// Folder template prepended to the file name, per the organize setting.
+    var folderTemplate: String {
+        var parts: [String] = []
+        if organize == .byType || organize == .byTypeAndChannel {
+            parts.append(isAudio ? "Music" : "Videos")
+        }
+        if let subfolder, !subfolder.isEmpty {
+            // "%" would be read as a template field; "/" would create folders.
+            parts.append(subfolder.replacingOccurrences(of: "%", with: "%%").replacingOccurrences(of: "/", with: "-"))
+        } else if organize == .byChannel || organize == .byTypeAndChannel {
+            parts.append("%(channel,uploader|Other)s")
+        }
+        return parts.map { $0 + "/" }.joined()
+    }
     var destination: URL { URL(fileURLWithPath: destinationPath) }
 
     /// The full yt-dlp argument list for one download.
@@ -182,19 +243,22 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
         if downloadPlaylist {
             args += ["--yes-playlist"]
             if playlistLimit > 0 { args += ["--playlist-items", "1:\(playlistLimit)"] }
-            template = "%(playlist_title,playlist_id|Playlist)s/%(playlist_index)03d - \(name).%(ext)s"
+            template = folderTemplate + "%(playlist_title,playlist_id|Playlist)s/%(playlist_index)03d - \(name).%(ext)s"
         } else {
             // --max-downloads 1 also stops a bare playlist URL from fetching everything.
             args += ["--no-playlist", "--max-downloads", "1"]
-            template = "\(name).%(ext)s"
+            template = folderTemplate + "\(name).%(ext)s"
         }
 
         if embedArtwork {
-            args += ["--embed-metadata"]
+            args += ["--embed-metadata", "--embed-chapters"]
             if !isAudio || audioFormat.supportsArtwork {
                 args += ["--embed-thumbnail", "--convert-thumbnails", "jpg"]
             }
         }
+        // Clipping already cuts the timeline; SponsorBlock removal on top of it fails.
+        if clip == nil { args += sponsorBlock.arguments }
+        if speedLimit != .unlimited { args += ["--limit-rate", "\(speedLimit.rawValue)M"] }
         if !isAudio, subtitles != .off {
             args += ["--write-subs", "--write-auto-subs", "--sub-langs", subtitleLanguage.ytdlpCodes]
             args += subtitles == .embed ? ["--embed-subs"] : ["--convert-subs", "srt"]
@@ -242,6 +306,7 @@ nonisolated struct MediaInfo: Codable, Sendable, Equatable {
     var artist: String?
     var album: String?
     var isLive: Bool
+    var channelURL: String?
 
     static func parse(_ data: Data) -> MediaInfo? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -271,7 +336,8 @@ nonisolated struct MediaInfo: Codable, Sendable, Equatable {
             track: json["track"] as? String,
             artist: (json["artist"] as? String) ?? (json["creator"] as? String),
             album: json["album"] as? String,
-            isLive: (json["is_live"] as? Bool) ?? false
+            isLive: (json["is_live"] as? Bool) ?? false,
+            channelURL: (json["channel_url"] as? String) ?? (json["uploader_url"] as? String)
         )
     }
 
@@ -322,6 +388,8 @@ nonisolated struct HistoryItem: Codable, Sendable, Identifiable, Equatable {
     var isPlaylist: Bool
     var duration: Double?
     var byteCount: Int64?
+    /// The Mac it was downloaded on (history syncs through iCloud Drive).
+    var deviceName: String?
 
     var fileURLs: [URL] { filePaths.map { URL(fileURLWithPath: $0) } }
     var primaryFile: URL? { fileURLs.first }

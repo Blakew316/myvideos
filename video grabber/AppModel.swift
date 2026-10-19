@@ -5,13 +5,15 @@
 
 import AppKit
 import Observation
+import SystemConfiguration
 import UserNotifications
 
 enum SidebarItem: Hashable {
-    case download, queue, history
+    case download, queue, history, convert, subscriptions
+    case subscription(UUID)
 }
 
-/// The single source of truth shared by the main window, the menu bar extra,
+/// The single source of truth shared by the main window, the menu bar extra, App Intents,
 /// the Services menu and the Share extension's URL hand-off.
 @Observable
 final class AppModel {
@@ -20,18 +22,44 @@ final class AppModel {
     let prefs = Preferences()
     let toolchain = Toolchain()
     let history = HistoryStore()
+    let subscriptions = SubscriptionStore()
+    let sync = SyncService()
+
+    /// The Mac's name as shown in Sharing settings, recorded with each download.
+    static let deviceName: String = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "This Mac"
+
+    /// Running inside the unit-test host: skip timers, sync and other side effects.
+    static let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     // Navigation
     var selection: SidebarItem? = .download
     var showOnboarding = false
     /// Bumped to ask the composer to focus its link field.
     var focusRequest = 0
+    /// Presents the Subscribe sheet, optionally prefilled with a link.
+    var subscribeRequest: SubscribeRequest?
 
-    // Queue
+    struct SubscribeRequest: Identifiable {
+        let id = UUID()
+        var link: String
+    }
+
+    // Queue (oldest first: the top of "Up Next" runs next)
     private(set) var jobs: [DownloadJob] = []
-    var activeJob: DownloadJob? { jobs.first { $0.isActive } }
+    private var starting: Set<UUID> = []
+    var activeJobs: [DownloadJob] { jobs.filter(\.isActive) }
+    var activeJob: DownloadJob? { activeJobs.first }
     var pendingCount: Int { jobs.filter { $0.isActive || $0.phase == .queued }.count }
-    var isBusy: Bool { pendingCount > 0 }
+    var pausedCount: Int { jobs.filter { $0.phase == .paused }.count }
+    var isBusy: Bool { pendingCount > 0 || conversions.contains(where: \.isActive) }
+
+    // Conversions
+    private(set) var conversions: [ConvertJob] = []
+    /// Files dropped on the Dock icon, waiting for a format choice.
+    var stagedFiles: [URL] = []
+    var convertPreset: ConvertPreset = ConvertPreset(rawValue: UserDefaults.standard.string(forKey: "convertPreset") ?? "") ?? .compatible {
+        didSet { UserDefaults.standard.set(convertPreset.rawValue, forKey: "convertPreset") }
+    }
 
     // Activity log
     private(set) var activityLog = ""
@@ -76,14 +104,25 @@ final class AppModel {
     private(set) var clipboardHasLink = false
     private var clipboardChangeCountSeen = -1
 
+    // Subscriptions
+    private(set) var checkingSubscriptions: Set<UUID> = []
+    private var subscriptionTimer: Task<Void, Never>?
+
     private init() {}
 
     // MARK: - Launch
 
     func bootstrap() {
+        guard !Self.isTesting else { return }
         NSApp.servicesProvider = ServiceProvider()
         NSUpdateDynamicServices()
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        Diagnostics.shared.start()
+
+        NotificationCenter.default.addObserver(forName: .myVideosLocalDataChanged, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { AppModel.shared.sync.scheduleSync(model: AppModel.shared) }
+        }
+        sync.configure(enabled: prefs.iCloudSync, model: self)
 
         Task {
             await toolchain.refresh()
@@ -95,15 +134,23 @@ final class AppModel {
                (Toolchain.lastUpdateCheck ?? .distantPast) < weekAgo {
                 await toolchain.checkForUpdates()
             }
+            startSubscriptionTimer()
         }
+    }
+
+    func setSyncEnabled(_ enabled: Bool) {
+        prefs.iCloudSync = enabled
+        sync.configure(enabled: enabled, model: self)
     }
 
     // MARK: - Composer
 
     var trimmedURL: String { urlString.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    var isValidURL: Bool {
-        guard let url = URL(string: trimmedURL), let scheme = url.scheme?.lowercased() else { return false }
+    var isValidURL: Bool { Self.isWebLink(trimmedURL) }
+
+    static func isWebLink(_ text: String) -> Bool {
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased() else { return false }
         return (scheme == "http" || scheme == "https") && url.host != nil
     }
 
@@ -129,6 +176,13 @@ final class AppModel {
     var clipDuration: Double? {
         guard let info = previewInfo, !info.isPlaylist, !info.isLive, let d = info.duration, d > 1 else { return nil }
         return d
+    }
+
+    /// The channel or playlist this link belongs to, if it can be subscribed to.
+    var subscribableLink: String? {
+        guard let info = previewInfo else { return nil }
+        if info.isPlaylist { return trimmedURL }
+        return info.channelURL
     }
 
     private func urlChanged() {
@@ -182,12 +236,17 @@ final class AppModel {
         applyingSuggestedTags = false
     }
 
-    private func fetchInfo(url: String, playlist: Bool) async -> PreviewState {
-        guard let tool = toolchain.ytdlp else { return .failed("yt-dlp isn’t installed.") }
-        var args = ["-J", "--no-warnings", "--flat-playlist", "--socket-timeout", "20",
-                    playlist ? "--yes-playlist" : "--no-playlist"]
+    private func baseFetchArguments() async -> [String] {
+        var args = ["--no-warnings", "--socket-timeout", "20"]
         if toolchain.impersonationAvailable { args += ["--impersonate", "chrome"] }
         args += await cookieArguments(for: prefs.baseOptions)
+        return args
+    }
+
+    private func fetchInfo(url: String, playlist: Bool) async -> PreviewState {
+        guard let tool = toolchain.ytdlp else { return .failed("yt-dlp isn’t installed.") }
+        var args = ["-J", "--flat-playlist", playlist ? "--yes-playlist" : "--no-playlist"]
+        args += await baseFetchArguments()
         args += ["--", url]
         do {
             let output = try await ProcessRunner.run(tool, args)
@@ -195,18 +254,23 @@ final class AppModel {
             if output.status == 0, let info = MediaInfo.parse(output.stdout) {
                 return .loaded(info)
             }
-            let error = output.stderr.split(separator: "\n").last { $0.contains("ERROR") }
-                .map { $0.replacingOccurrences(of: "ERROR: ", with: "") } ?? ""
-            if error.localizedCaseInsensitiveContains("unsupported url") {
-                return .failed("This site isn’t supported.")
-            }
-            if error.localizedCaseInsensitiveContains("sign in") || error.localizedCaseInsensitiveContains("private") {
-                return .failed("This video needs you to be signed in.")
-            }
-            return .failed("Couldn’t load details for this link.")
+            return .failed(Self.describeFetchError(output.stderr))
         } catch {
             return .failed("Couldn’t load details for this link.")
         }
+    }
+
+    private static func describeFetchError(_ stderr: String) -> String {
+        let error = stderr.split(separator: "\n").last { $0.contains("ERROR") }.map(String.init) ?? ""
+        if error.localizedCaseInsensitiveContains("unsupported url") { return "This site isn’t supported." }
+        if error.localizedCaseInsensitiveContains("sign in") || error.localizedCaseInsensitiveContains("private")
+            || error.localizedCaseInsensitiveContains("logged-in") {
+            return "This needs you to be signed in."
+        }
+        if error.localizedCaseInsensitiveContains("unavailable") || error.localizedCaseInsensitiveContains("does not exist") {
+            return "This video is unavailable."
+        }
+        return "Couldn’t load details for this link."
     }
 
     /// Queues the link in the composer with the current choices, then clears the composer.
@@ -231,15 +295,17 @@ final class AppModel {
 
     // MARK: - Queue
 
-    func enqueue(url: String, options: DownloadOptions, info: MediaInfo?, tags: MusicTags) {
+    @discardableResult
+    func enqueue(url: String, options: DownloadOptions, info: MediaInfo?, tags: MusicTags) -> DownloadJob {
         let job = DownloadJob(url: url, options: options, info: info, tags: tags)
-        jobs.insert(job, at: 0)
+        jobs.append(job)
         if prefs.notificationsEnabled { Notifier.requestAuthorization() }
         if info == nil { fillInDetails(for: job) }
         processQueue()
+        return job
     }
 
-    /// Links queued from the Share menu or Services arrive without a preview —
+    /// Links queued from the Share menu, Services or Shortcuts arrive without a preview —
     /// look the details up in parallel so the row and history get a title and artwork.
     private func fillInDetails(for job: DownloadJob) {
         Task { [weak self] in
@@ -251,24 +317,33 @@ final class AppModel {
         }
     }
 
-    private func processQueue() {
+    /// Starts queued downloads until the simultaneous-download limit is reached.
+    func processQueue() {
         defer { updateDock() }
-        guard activeJob == nil,
-              let next = jobs.last(where: { $0.phase == .queued }) else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            let cookies = await self.cookieArguments(for: next.options)
-            // It may have been cancelled while cookies were being prepared.
-            guard next.phase == .queued, self.activeJob == nil else { return }
-            next.start(toolchain: self.toolchain, cookieArguments: cookies,
-                       log: { [weak self] line in
-                           self?.appendLog(line)
-                           self?.updateDock()
-                       },
-                       completion: { [weak self] in
-                           self?.jobFinished(next)
-                       })
-            self.updateDock()
+        var slots = prefs.maxConcurrent - activeJobs.count - starting.count
+        for job in jobs where job.phase == .queued && !starting.contains(job.id) {
+            guard slots > 0 else { break }
+            slots -= 1
+            starting.insert(job.id)
+            Task { [weak self] in
+                guard let self else { return }
+                let cookies = await self.cookieArguments(for: job.options)
+                self.starting.remove(job.id)
+                // It may have been paused or cancelled while cookies were being prepared.
+                guard job.phase == .queued else {
+                    self.processQueue()
+                    return
+                }
+                job.start(toolchain: self.toolchain, cookieArguments: cookies,
+                          log: { [weak self] line in
+                              self?.appendLog(line)
+                              self?.updateDock()
+                          },
+                          completion: { [weak self] in
+                              self?.jobFinished(job)
+                          })
+                self.updateDock()
+            }
         }
     }
 
@@ -277,15 +352,42 @@ final class AppModel {
         switch job.phase {
         case .finished:
             recordHistory(for: job)
-            if job.options.isAudio && job.options.addToMusic { addToMusic(job) }
-            Notifier.post(title: job.savedFiles.count > 1 ? "Playlist Downloaded" : "Download Complete",
-                          body: job.displayTitle, enabled: prefs.notificationsEnabled)
+            if let subID = job.subscriptionID, let entryID = job.feedEntryID {
+                subscriptions.update(subID) { $0.downloadedIDs.append(entryID) }
+            }
+            if job.options.isAudio && (job.options.addToMusic || job.options.fetchLyrics) {
+                Task { await finishAudio(job) }
+            }
+            if job.subscriptionID == nil {
+                Notifier.post(title: job.savedFiles.count > 1 ? "Playlist Downloaded" : "Download Complete",
+                              body: job.displayTitle, enabled: prefs.notificationsEnabled)
+            }
         case .failed:
             Notifier.post(title: "Download Failed",
                           body: "\(job.displayTitle) — \(job.errorMessage ?? "")", enabled: prefs.notificationsEnabled)
         default:
             break
         }
+        processQueue()
+    }
+
+    func pause(_ job: DownloadJob) {
+        job.pause()
+        updateDock()
+    }
+
+    func resume(_ job: DownloadJob) {
+        job.resume()
+        processQueue()
+    }
+
+    func pauseAll() {
+        for job in jobs where job.isActive || job.phase == .queued { job.pause() }
+        updateDock()
+    }
+
+    func resumeAll() {
+        for job in jobs where job.phase == .paused { job.resume() }
         processQueue()
     }
 
@@ -298,14 +400,27 @@ final class AppModel {
     func retry(_ job: DownloadJob) {
         job.requeue()
         jobs.removeAll { $0.id == job.id }
-        jobs.insert(job, at: 0)
+        jobs.append(job)
         processQueue()
     }
 
     func remove(_ job: DownloadJob) {
-        if job.isActive { job.cancel() }
+        if job.isActive || job.isWaiting { job.cancel() }
         jobs.removeAll { $0.id == job.id }
         updateDock()
+        processQueue()
+    }
+
+    var upNext: [DownloadJob] { jobs.filter(\.isWaiting) }
+
+    /// Reorders waiting downloads (offsets refer to the `upNext` list).
+    func moveUpNext(from source: IndexSet, to destination: Int) {
+        let waiting = upNext
+        let moving = source.map { waiting[$0] }
+        var remaining = waiting.enumerated().filter { !source.contains($0.offset) }.map(\.element)
+        let insertAt = min(destination - source.filter { $0 < destination }.count, remaining.count)
+        remaining.insert(contentsOf: moving, at: max(insertAt, 0))
+        jobs = jobs.filter { !$0.isWaiting } + remaining
     }
 
     func clearFinished() {
@@ -313,11 +428,14 @@ final class AppModel {
     }
 
     func cancelAll() {
-        for job in jobs where job.isActive || job.phase == .queued { job.cancel() }
+        for job in jobs where job.isActive || job.isWaiting { job.cancel() }
+        for conversion in conversions where conversion.phase == .converting || conversion.phase == .waiting {
+            conversion.cancel()
+        }
         updateDock()
     }
 
-    // MARK: - History & Apple Music
+    // MARK: - History, lyrics & Apple Music
 
     private func recordHistory(for job: DownloadJob) {
         guard !job.savedFiles.isEmpty else { return }
@@ -331,32 +449,57 @@ final class AppModel {
                                 isAudio: job.options.isAudio,
                                 isPlaylist: job.savedFiles.count > 1,
                                 duration: job.options.clip.map { $0.upperBound - $0.lowerBound } ?? job.info?.duration,
-                                byteCount: size))
+                                byteCount: size,
+                                deviceName: Self.deviceName))
     }
 
-    private func addToMusic(_ job: DownloadJob) {
+    /// Finds lyrics, writes them into each song, and adds the songs to Apple Music.
+    private func finishAudio(_ job: DownloadJob) async {
         let files = job.savedFiles.filter(MusicLibrary.canImport)
         guard !files.isEmpty else {
-            if !job.savedFiles.isEmpty {
-                job.musicState = .failed("Apple Music can’t import .\(job.savedFiles[0].pathExtension) files.")
+            if job.options.addToMusic, let first = job.savedFiles.first {
+                job.musicState = .failed("Apple Music can’t import .\(first.pathExtension) files.")
             }
             return
         }
-        // Single songs get the edited tags; playlist tracks keep their embedded metadata,
-        // with the album name applied to all of them if one was given.
-        let tags = files.count == 1 ? job.tags : MusicTags(album: job.tags.album)
-        job.musicState = .adding
-        Task { [weak self] in
-            do {
-                for file in files {
-                    try await MusicLibrary.add(file, tags: tags)
-                    self?.appendLog("Added to Apple Music: \(file.lastPathComponent)")
+        var lyricsFound = 0
+        do {
+            for file in files {
+                // Single songs use the (editable) tags; playlist tracks read their own.
+                var tags = job.tags
+                if files.count > 1, let ffprobe = toolchain.ffprobe {
+                    let embedded = await MediaTags.read(file, ffprobe: ffprobe)
+                    let guess = MediaInfo(id: "", title: embedded.title, uploader: embedded.artist, duration: nil,
+                                          thumbnailURL: nil, webpageURL: nil, site: nil, isPlaylist: false,
+                                          playlistCount: nil, track: nil, artist: nil, album: nil,
+                                          isLive: false, channelURL: nil).suggestedTags
+                    tags = MusicTags(title: guess.title, artist: guess.artist, album: job.tags.album)
                 }
-                job.musicState = .added
-            } catch {
-                job.musicState = .failed(error.localizedDescription)
-                self?.showMusicError(error)
+
+                var lyrics: String?
+                if job.options.fetchLyrics {
+                    job.musicState = .findingLyrics
+                    let duration = files.count == 1 ? job.info?.duration : nil
+                    lyrics = await Lyrics.find(title: tags.title, artist: tags.artist, duration: duration)
+                    if let lyrics, let ffmpeg = toolchain.ffmpeg {
+                        if await Lyrics.embed(lyrics, in: file, ffmpeg: ffmpeg) {
+                            lyricsFound += 1
+                            appendLog("Added lyrics: \(file.lastPathComponent)")
+                        }
+                    }
+                }
+                if job.options.addToMusic {
+                    job.musicState = .adding
+                    try await MusicLibrary.add(file, tags: tags, lyrics: lyrics)
+                    appendLog("Added to Apple Music: \(file.lastPathComponent)")
+                }
             }
+            job.lyricsCount = lyricsFound
+            job.musicState = job.options.addToMusic ? .added : .none
+        } catch {
+            job.lyricsCount = lyricsFound
+            job.musicState = .failed(error.localizedDescription)
+            showMusicError(error)
         }
     }
 
@@ -394,6 +537,166 @@ final class AppModel {
         options.downloadPlaylist = item.isPlaylist
         enqueue(url: item.sourceURL, options: options, info: nil, tags: MusicTags())
         selection = .queue
+    }
+
+    // MARK: - Subscriptions
+
+    enum FeedResult {
+        case success(Feed)
+        case failure(String)
+    }
+
+    func fetchFeed(_ link: String) async -> FeedResult {
+        guard let tool = toolchain.ytdlp else { return .failure("yt-dlp isn’t installed.") }
+        var url = FeedParser.normalize(link)
+        for _ in 0..<2 {
+            var args = ["-J", "--flat-playlist", "--yes-playlist", "--playlist-items", "1:15"]
+            args += await baseFetchArguments()
+            args += ["--", url]
+            guard let output = try? await ProcessRunner.run(tool, args) else {
+                return .failure("Couldn’t check this channel.")
+            }
+            guard output.status == 0, let feed = FeedParser.parse(output.stdout) else {
+                return .failure(Self.describeFetchError(output.stderr))
+            }
+            if let tab = feed.videosTabURL {
+                url = tab
+                continue
+            }
+            if feed.entries.isEmpty { return .failure("This doesn’t look like a channel or playlist with videos.") }
+            return .success(feed)
+        }
+        return .failure("Couldn’t find this channel’s videos.")
+    }
+
+    /// Adds a subscription. Existing uploads are marked as seen; optionally the newest few download now.
+    func subscribe(link: String, feed: Feed, isAudio: Bool, quality: DownloadQuality,
+                   addToMusic: Bool, downloadLatest: Int) {
+        var sub = Subscription(url: FeedParser.normalize(link), title: feed.title, avatarURL: feed.avatarURL,
+                               isAudio: isAudio, quality: quality, addToMusic: addToMusic)
+        sub.seenIDs = feed.entries.map(\.id)
+        sub.recent = Array(feed.entries.prefix(12))
+        sub.lastChecked = Date()
+        subscriptions.add(sub)
+        for entry in feed.entries.prefix(downloadLatest).reversed() {
+            download(entry, from: sub)
+        }
+        selection = .subscription(sub.id)
+    }
+
+    func unsubscribe(_ id: UUID) {
+        if case .subscription(id) = selection { selection = .subscriptions }
+        subscriptions.remove(id)
+    }
+
+    /// Downloads one upload from a subscription with its format settings.
+    func download(_ entry: FeedEntry, from sub: Subscription) {
+        let info = MediaInfo(id: entry.id, title: entry.title, uploader: sub.title, duration: entry.duration,
+                             thumbnailURL: entry.thumbnailURL, webpageURL: entry.url, site: nil,
+                             isPlaylist: false, playlistCount: nil, track: nil, artist: nil, album: nil,
+                             isLive: false, channelURL: sub.url)
+        let job = enqueue(url: entry.url, options: sub.options(from: prefs.baseOptions), info: info, tags: info.suggestedTags)
+        job.subscriptionID = sub.id
+        job.feedEntryID = entry.id
+    }
+
+    func checkSubscription(_ id: UUID) async {
+        guard let sub = subscriptions.subscription(id: id), !checkingSubscriptions.contains(id) else { return }
+        checkingSubscriptions.insert(id)
+        defer { checkingSubscriptions.remove(id) }
+
+        switch await fetchFeed(sub.url) {
+        case .failure(let message):
+            subscriptions.update(id) {
+                $0.lastChecked = Date()
+                $0.lastError = message
+            }
+        case .success(let feed):
+            // Re-read: it may have changed (or synced) while the feed was loading.
+            guard let current = subscriptions.subscription(id: id) else { return }
+            let fresh = FeedParser.newEntries(in: feed, seen: current.seenIDs)
+            subscriptions.update(id) {
+                $0.lastChecked = Date()
+                $0.lastError = nil
+                $0.recent = Array(feed.entries.prefix(12))
+                if let avatar = feed.avatarURL { $0.avatarURL = avatar }
+                $0.seenIDs += fresh.map(\.id)
+                $0.unseenCount += fresh.count
+            }
+            if !fresh.isEmpty, current.isEnabled {
+                for entry in fresh { download(entry, from: current) }
+                Notifier.post(title: current.title,
+                              body: fresh.count == 1 ? "New: \(fresh[0].title)" : "\(fresh.count) new uploads are downloading.",
+                              enabled: prefs.notificationsEnabled)
+            }
+        }
+    }
+
+    func checkAllSubscriptions(onlyDue: Bool) async {
+        let interval = TimeInterval(prefs.subscriptionInterval * 60)
+        for sub in subscriptions.items where sub.isEnabled {
+            if onlyDue, let last = sub.lastChecked, Date().timeIntervalSince(last) < interval { continue }
+            await checkSubscription(sub.id)
+        }
+    }
+
+    private func startSubscriptionTimer() {
+        subscriptionTimer?.cancel()
+        subscriptionTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.toolchain.isReady { await self.checkAllSubscriptions(onlyDue: true) }
+                try? await Task.sleep(for: .seconds(120))
+            }
+        }
+    }
+
+    func markViewed(_ id: UUID) {
+        guard subscriptions.subscription(id: id)?.unseenCount ?? 0 > 0 else { return }
+        subscriptions.update(id) { $0.unseenCount = 0 }
+    }
+
+    // MARK: - Conversions
+
+    func convert(_ files: [URL], preset: ConvertPreset) {
+        for file in files {
+            conversions.append(ConvertJob(input: file, preset: preset))
+        }
+        stagedFiles.removeAll { files.contains($0) }
+        processConversions()
+    }
+
+    /// Files dropped on the Dock icon or opened with My Videos wait here for a format choice.
+    func stage(_ files: [URL]) {
+        stagedFiles = Array(NSOrderedSet(array: stagedFiles + files)) as? [URL] ?? files
+        selection = .convert
+    }
+
+    func removeConversion(_ job: ConvertJob) {
+        job.cancel()
+        conversions.removeAll { $0.id == job.id }
+    }
+
+    func clearFinishedConversions() {
+        conversions.removeAll { $0.phase == .finished || $0.phase == .failed || $0.phase == .cancelled }
+    }
+
+    private func processConversions() {
+        guard !conversions.contains(where: \.isActive),
+              let next = conversions.first(where: { $0.phase == .waiting }) else { return }
+        guard let ffmpeg = toolchain.ffmpeg else {
+            alert = AppAlert(title: "ffmpeg Isn’t Installed", message: "Install it in Settings → Components to convert files.")
+            return
+        }
+        appendLog("$ ffmpeg (\(next.preset.title)) \(next.input.lastPathComponent)")
+        next.start(ffmpeg: ffmpeg, ffprobe: toolchain.ffprobe) { [weak self] in
+            guard let self else { return }
+            if next.phase == .finished {
+                Notifier.post(title: "Conversion Complete", body: next.output?.lastPathComponent ?? "",
+                              enabled: self.prefs.notificationsEnabled)
+            }
+            self.processConversions()
+        }
     }
 
     // MARK: - Sign-in
@@ -447,35 +750,35 @@ final class AppModel {
     /// Reads the clipboard into the composer (used by the Paste and Download command).
     @discardableResult
     func pasteFromClipboard() -> Bool {
-        clipboardChangeCountSeen = NSPasteboard.general.changeCount
-        clipboardHasLink = false
         let pasteboard = NSPasteboard.general
-        let text = pasteboard.string(forType: .URL) ?? pasteboard.string(forType: .string) ?? ""
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        selection = .download
-        urlString = trimmed
+        paste(pasteboard.string(forType: .URL) ?? pasteboard.string(forType: .string))
         return isValidURL
     }
 
-    // MARK: - Incoming links (URL scheme, Services, Share extension)
+    // MARK: - Incoming links (URL scheme, Services, Share extension, Shortcuts)
 
-    /// myvideos://download?url=<link>
+    /// myvideos://download?url=<link>[&format=audio]
     func handleIncoming(_ url: URL) {
         guard url.scheme == "myvideos",
-              let link = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "url" })?.value else { return }
-        downloadImmediately(link)
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let link = items.first(where: { $0.name == "url" })?.value else { return }
+        let audio = items.first(where: { $0.name == "format" })?.value == "audio"
+        downloadImmediately(link, audioOnly: audio ? true : nil)
     }
 
     /// Queues a link with the current defaults and brings the queue forward.
-    func downloadImmediately(_ link: String) {
+    @discardableResult
+    func downloadImmediately(_ link: String, audioOnly: Bool? = nil, showQueue: Bool = true) -> DownloadJob? {
         let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+        guard Self.isWebLink(trimmed) else { return nil }
         var options = prefs.baseOptions
         options.downloadPlaylist = false
-        enqueue(url: trimmed, options: options, info: nil, tags: MusicTags())
-        selection = .queue
+        if let audioOnly {
+            options.quality = audioOnly ? .audio : (prefs.quality == .audio ? .best : prefs.quality)
+        }
+        let job = enqueue(url: trimmed, options: options, info: nil, tags: MusicTags())
+        if showQueue { selection = .queue }
+        return job
     }
 
     // MARK: - Log & Dock
@@ -489,7 +792,7 @@ final class AppModel {
     func log(_ line: String) { appendLog(line) }
 
     func updateDock() {
-        DockProgress.shared.update(job: activeJob, badgeCount: pendingCount)
+        DockProgress.shared.update(jobs: activeJobs, badgeCount: pendingCount)
     }
 }
 
@@ -531,7 +834,7 @@ final class ServiceProvider: NSObject {
                            error: AutoreleasingUnsafeMutablePointer<NSString?>) {
         let text = pasteboard.string(forType: .URL) ?? pasteboard.string(forType: .string) ?? ""
         let link = text.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
-        guard URL(string: link)?.scheme?.hasPrefix("http") == true else {
+        guard AppModel.isWebLink(link) else {
             error.pointee = "The selection isn’t a web link." as NSString
             return
         }

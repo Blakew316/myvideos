@@ -7,28 +7,42 @@ import Foundation
 import Observation
 
 /// Persisted user choices. Download controls remember what was used last.
+/// Download-related settings also sync between Macs through iCloud Drive.
 @Observable
 final class Preferences {
     private let defaults = UserDefaults.standard
 
-    var quality: DownloadQuality { didSet { save(quality.rawValue, Keys.quality) } }
-    var audioFormat: AudioFormat { didSet { save(audioFormat.rawValue, Keys.audioFormat) } }
-    var audioBitrate: AudioBitrate { didSet { save(audioBitrate.rawValue, Keys.audioBitrate) } }
-    var destination: URL { didSet { save(destination.path, Keys.destination) } }
-    var subtitles: SubtitleMode { didSet { save(subtitles.rawValue, Keys.subtitles) } }
-    var subtitleLanguage: SubtitleLanguage { didSet { save(subtitleLanguage.rawValue, Keys.subtitleLanguage) } }
-    var embedArtwork: Bool { didSet { save(embedArtwork, Keys.embedArtwork) } }
-    var addToMusic: Bool { didSet { save(addToMusic, Keys.addToMusic) } }
+    // Synced download settings
+    var quality: DownloadQuality { didSet { save(quality.rawValue, Keys.quality, synced: true) } }
+    var audioFormat: AudioFormat { didSet { save(audioFormat.rawValue, Keys.audioFormat, synced: true) } }
+    var audioBitrate: AudioBitrate { didSet { save(audioBitrate.rawValue, Keys.audioBitrate, synced: true) } }
+    var subtitles: SubtitleMode { didSet { save(subtitles.rawValue, Keys.subtitles, synced: true) } }
+    var subtitleLanguage: SubtitleLanguage { didSet { save(subtitleLanguage.rawValue, Keys.subtitleLanguage, synced: true) } }
+    var embedArtwork: Bool { didSet { save(embedArtwork, Keys.embedArtwork, synced: true) } }
+    var addToMusic: Bool { didSet { save(addToMusic, Keys.addToMusic, synced: true) } }
+    var fetchLyrics: Bool { didSet { save(fetchLyrics, Keys.fetchLyrics, synced: true) } }
+    var sponsorBlock: SponsorBlockMode { didSet { save(sponsorBlock.rawValue, Keys.sponsorBlock, synced: true) } }
+    var organize: OrganizeMode { didSet { save(organize.rawValue, Keys.organize, synced: true) } }
+    var speedLimit: SpeedLimit { didSet { save(speedLimit.rawValue, Keys.speedLimit, synced: true) } }
+    var maxConcurrent: Int { didSet { save(maxConcurrent, Keys.maxConcurrent, synced: true) } }
+    /// Minutes between subscription checks.
+    var subscriptionInterval: Int { didSet { save(subscriptionInterval, Keys.subscriptionInterval, synced: true) } }
 
+    // This Mac only
+    var destination: URL { didSet { save(destination.path, Keys.destination) } }
     var cookieSource: CookieSource { didSet { save(cookieSource.rawValue, Keys.cookieSource) } }
     var cookieBrowser: CookieBrowser { didSet { save(cookieBrowser.rawValue, Keys.cookieBrowser) } }
     var cookieFilePath: String { didSet { save(cookieFilePath, Keys.cookieFile) } }
-
     var notificationsEnabled: Bool { didSet { save(notificationsEnabled, Keys.notifications) } }
     var clipboardDetection: Bool { didSet { save(clipboardDetection, Keys.clipboard) } }
     var showMenuBarExtra: Bool { didSet { save(showMenuBarExtra, Keys.menuBar) } }
     var autoCheckUpdates: Bool { didSet { save(autoCheckUpdates, Keys.autoUpdate) } }
     var hasCompletedOnboarding: Bool { didSet { save(hasCompletedOnboarding, Keys.onboarding) } }
+    var iCloudSync: Bool { didSet { save(iCloudSync, Keys.iCloudSync) } }
+
+    /// When a synced setting last changed here; the newer side wins when syncing.
+    private(set) var syncedSettingsModified: Date
+    private var applyingRemote = false
 
     private enum Keys {
         static let destination = "destinationPath"
@@ -42,11 +56,19 @@ final class Preferences {
         static let subtitleLanguage = "subtitleLanguage"
         static let embedArtwork = "embedArtwork"
         static let addToMusic = "addToMusic"
+        static let fetchLyrics = "fetchLyrics"
+        static let sponsorBlock = "sponsorBlock"
+        static let organize = "organize"
+        static let speedLimit = "speedLimit"
+        static let maxConcurrent = "maxConcurrent"
+        static let subscriptionInterval = "subscriptionInterval"
         static let notifications = "notificationsEnabled"
         static let clipboard = "clipboardDetection"
         static let menuBar = "showMenuBarExtra"
         static let autoUpdate = "autoCheckUpdates"
         static let onboarding = "hasCompletedOnboarding"
+        static let iCloudSync = "iCloudSync"
+        static let syncedModified = "syncedSettingsModified"
     }
 
     init() {
@@ -57,6 +79,9 @@ final class Preferences {
         func bool(_ key: String, _ fallback: Bool) -> Bool {
             d.object(forKey: key) == nil ? fallback : d.bool(forKey: key)
         }
+        func int(_ key: String, _ fallback: Int) -> Int {
+            d.object(forKey: key) == nil ? fallback : d.integer(forKey: key)
+        }
 
         quality = value(Keys.quality, .best)
         audioFormat = value(Keys.audioFormat, .m4a)
@@ -64,16 +89,25 @@ final class Preferences {
         subtitles = value(Keys.subtitles, .off)
         subtitleLanguage = value(Keys.subtitleLanguage,
                                  SubtitleLanguage(rawValue: Locale.current.language.languageCode?.identifier ?? "en") ?? .en)
+        embedArtwork = bool(Keys.embedArtwork, true)
+        addToMusic = bool(Keys.addToMusic, true)
+        fetchLyrics = bool(Keys.fetchLyrics, true)
+        sponsorBlock = value(Keys.sponsorBlock, .off)
+        organize = value(Keys.organize, .none)
+        speedLimit = SpeedLimit(rawValue: int(Keys.speedLimit, 0)) ?? .unlimited
+        maxConcurrent = min(max(int(Keys.maxConcurrent, 1), 1), 3)
+        subscriptionInterval = int(Keys.subscriptionInterval, 60)
+
         cookieSource = value(Keys.cookieSource, .none)
         cookieBrowser = value(Keys.cookieBrowser, .chrome)
         cookieFilePath = d.string(forKey: Keys.cookieFile) ?? ""
-        embedArtwork = bool(Keys.embedArtwork, true)
-        addToMusic = bool(Keys.addToMusic, true)
         notificationsEnabled = bool(Keys.notifications, true)
         clipboardDetection = bool(Keys.clipboard, true)
         showMenuBarExtra = bool(Keys.menuBar, true)
         autoCheckUpdates = bool(Keys.autoUpdate, true)
         hasCompletedOnboarding = bool(Keys.onboarding, false)
+        iCloudSync = bool(Keys.iCloudSync, false)
+        syncedSettingsModified = d.object(forKey: Keys.syncedModified) as? Date ?? .distantPast
 
         if let path = d.string(forKey: Keys.destination), FileManager.default.fileExists(atPath: path) {
             destination = URL(fileURLWithPath: path)
@@ -83,8 +117,13 @@ final class Preferences {
         }
     }
 
-    private func save(_ value: Any, _ key: String) {
+    private func save(_ value: Any, _ key: String, synced: Bool = false) {
         defaults.set(value, forKey: key)
+        if synced && !applyingRemote {
+            syncedSettingsModified = Date()
+            defaults.set(syncedSettingsModified, forKey: Keys.syncedModified)
+            NotificationCenter.default.post(name: .myVideosLocalDataChanged, object: nil)
+        }
     }
 
     /// The options a new download starts from.
@@ -94,6 +133,57 @@ final class Preferences {
                         subtitles: subtitles, subtitleLanguage: subtitleLanguage,
                         embedArtwork: embedArtwork, addToMusic: addToMusic,
                         cookieSource: cookieSource, cookieBrowser: cookieBrowser,
-                        cookieFilePath: cookieFilePath)
+                        cookieFilePath: cookieFilePath,
+                        sponsorBlock: sponsorBlock, organize: organize,
+                        speedLimit: speedLimit, fetchLyrics: fetchLyrics)
     }
+
+    // MARK: - Sync
+
+    var syncedSettings: SyncedSettings {
+        SyncedSettings(modified: syncedSettingsModified, quality: quality, audioFormat: audioFormat,
+                       audioBitrate: audioBitrate, subtitles: subtitles, subtitleLanguage: subtitleLanguage,
+                       embedArtwork: embedArtwork, addToMusic: addToMusic, fetchLyrics: fetchLyrics,
+                       sponsorBlock: sponsorBlock, organize: organize, speedLimit: speedLimit,
+                       maxConcurrent: maxConcurrent, subscriptionInterval: subscriptionInterval)
+    }
+
+    func apply(_ s: SyncedSettings) {
+        guard s.modified > syncedSettingsModified else { return }
+        applyingRemote = true
+        defer { applyingRemote = false }
+        quality = s.quality
+        audioFormat = s.audioFormat
+        audioBitrate = s.audioBitrate
+        subtitles = s.subtitles
+        subtitleLanguage = s.subtitleLanguage
+        embedArtwork = s.embedArtwork
+        addToMusic = s.addToMusic
+        fetchLyrics = s.fetchLyrics
+        sponsorBlock = s.sponsorBlock
+        organize = s.organize
+        speedLimit = s.speedLimit
+        maxConcurrent = s.maxConcurrent
+        subscriptionInterval = s.subscriptionInterval
+        syncedSettingsModified = s.modified
+        defaults.set(s.modified, forKey: Keys.syncedModified)
+    }
+}
+
+/// The download settings shared between Macs.
+nonisolated struct SyncedSettings: Codable, Sendable, Equatable {
+    var modified: Date
+    var quality: DownloadQuality
+    var audioFormat: AudioFormat
+    var audioBitrate: AudioBitrate
+    var subtitles: SubtitleMode
+    var subtitleLanguage: SubtitleLanguage
+    var embedArtwork: Bool
+    var addToMusic: Bool
+    var fetchLyrics: Bool
+    var sponsorBlock: SponsorBlockMode
+    var organize: OrganizeMode
+    var speedLimit: SpeedLimit
+    var maxConcurrent: Int
+    var subscriptionInterval: Int
 }

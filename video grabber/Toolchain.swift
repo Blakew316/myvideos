@@ -31,6 +31,13 @@ final class Toolchain {
     private(set) var operationError: String?
     private(set) var lastOperationSucceeded = false
 
+    /// ffprobe ships alongside ffmpeg.
+    var ffprobe: URL? {
+        guard let dir = ffmpeg?.deletingLastPathComponent() else { return nil }
+        let url = dir.appendingPathComponent("ffprobe")
+        return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+    }
+
     var isReady: Bool { ytdlp != nil && ffmpeg != nil }
     var missingTools: [String] {
         [ytdlp == nil ? "yt-dlp" : nil, ffmpeg == nil ? "ffmpeg" : nil].compactMap { $0 }
