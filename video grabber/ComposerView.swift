@@ -27,7 +27,10 @@ struct ComposerView: View {
                 linkBar
                 banners
                 if model.displayedPreview != .empty {
-                    PreviewCard(state: model.displayedPreview, isAudio: prefs.quality == .audio)
+                    PreviewCard(state: model.displayedPreview, isAudio: prefs.quality == .audio,
+                                subscribeLink: subscribeLink) { link in
+                        model.subscribeRequest = .init(link: link)
+                    }
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                 }
                 formatCard
@@ -60,6 +63,12 @@ struct ComposerView: View {
         .onAppear { urlFocused = true }
         .onChange(of: model.focusRequest) { urlFocused = true }
         .navigationTitle("Download")
+    }
+
+    /// Offer "Subscribe" for channels and playlists that aren't followed yet.
+    private var subscribeLink: String? {
+        guard let link = model.subscribableLink, !model.subscriptions.contains(url: link) else { return nil }
+        return link
     }
 
     // MARK: - Header & link
@@ -143,6 +152,22 @@ struct ComposerView: View {
 
     @ViewBuilder
     private var banners: some View {
+        if Diagnostics.shared.hasNewCrash {
+            NoticeBanner(systemImage: "exclamationmark.bubble.fill", tint: .orange,
+                         title: "My Videos Quit Unexpectedly",
+                         message: "A report was saved on this Mac. Sharing it helps fix the problem.") {
+                HStack(spacing: 8) {
+                    Button("Dismiss") { Diagnostics.shared.markSeen() }
+                        .buttonStyle(.glass)
+                    Button("Save Report…") {
+                        Diagnostics.shared.exportReport(activityLog: model.activityLog, toolchain: toolchain)
+                        Diagnostics.shared.markSeen()
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.orange)
+                }
+            }
+        }
         if toolchain.hasChecked && !toolchain.isReady {
             NoticeBanner(systemImage: "wrench.and.screwdriver.fill", tint: .orange,
                          title: "Finish Setting Up",
@@ -229,6 +254,16 @@ struct ComposerView: View {
                         .fixedSize()
                     }
                 }
+                if isYouTubeLink {
+                    FormRow(title: "Sponsored Segments", systemImage: "forward.end.fill", color: .green,
+                            detail: prefs.sponsorBlock == .off ? "Powered by the SponsorBlock community." : nil) {
+                        Picker("Sponsored Segments", selection: $settings.sponsorBlock) {
+                            ForEach(SponsorBlockMode.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
             }
             FormRow(title: "Cover Art & Details", systemImage: "photo.fill", color: .indigo,
                     detail: "Adds the thumbnail, title and channel to the file.") {
@@ -237,6 +272,11 @@ struct ComposerView: View {
                     .toggleStyle(.switch)
             }
         }
+    }
+
+    private var isYouTubeLink: Bool {
+        guard let host = URL(string: model.trimmedURL)?.host?.lowercased() else { return true }
+        return host.hasSuffix("youtube.com") || host == "youtu.be"
     }
 
     private var playlistCard: some View {
@@ -299,6 +339,13 @@ struct ComposerView: View {
     private var musicCard: some View {
         FormCard(title: "Apple Music",
                  footer: model.downloadPlaylist ? "Each song keeps its own title and artist." : nil) {
+            FormRow(title: "Find Lyrics", systemImage: "quote.bubble.fill", color: .indigo,
+                    detail: "Adds lyrics to the song when they’re available.") {
+                Toggle("Find Lyrics", isOn: $settings.fetchLyrics)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(prefs.audioFormat == .wav || prefs.audioFormat == .opus)
+            }
             FormRow(title: "Add to Apple Music", systemImage: "music.note", color: .pink,
                     detail: prefs.audioFormat.worksWithAppleMusic ? nil : "Not available for Opus.") {
                 Toggle("Add to Apple Music", isOn: $settings.addToMusic)
@@ -375,6 +422,8 @@ struct ComposerView: View {
 struct PreviewCard: View {
     let state: AppModel.PreviewState
     let isAudio: Bool
+    var subscribeLink: String?
+    var subscribe: (String) -> Void = { _ in }
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -403,9 +452,22 @@ struct PreviewCard: View {
                         .lineLimit(2)
                         .textSelection(.enabled)
                     if let uploader = info.uploader {
-                        Text(uploader)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        HStack(spacing: 8) {
+                            Text(uploader)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            if let subscribeLink {
+                                Button {
+                                    subscribe(subscribeLink)
+                                } label: {
+                                    Label("Subscribe", systemImage: "plus")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .buttonStyle(.glass)
+                                .controlSize(.small)
+                                .help("Download new uploads from \(uploader) automatically")
+                            }
+                        }
                     }
                     HStack(spacing: 6) {
                         if info.isPlaylist {

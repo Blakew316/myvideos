@@ -46,20 +46,34 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let job = model.activeJob {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(job.displayTitle)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                    JobProgressBar(job: job)
-                    Text(job.statusLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .monospacedDigit()
+            if !model.activeJobs.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(model.activeJobs.prefix(3)) { job in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(job.displayTitle)
+                                    .font(.callout.weight(.medium))
+                                    .lineLimit(1)
+                                Spacer()
+                                Button {
+                                    model.pause(job)
+                                } label: {
+                                    Image(systemName: "pause.fill")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Pause")
+                            }
+                            JobProgressBar(job: job)
+                            Text(job.statusLine)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .monospacedDigit()
+                        }
+                        .padding(10)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 12, style: .continuous))
+                    }
                 }
-                .padding(10)
-                .glassEffect(.regular, in: .rect(cornerRadius: 12, style: .continuous))
             } else if let last = model.history.items.first {
                 Button {
                     if let file = last.primaryFile { NSWorkspace.shared.activateFileViewerSelecting([file]) }
@@ -78,6 +92,18 @@ struct MenuBarView: View {
             }
 
             Divider()
+
+            if !model.subscriptions.items.isEmpty {
+                Button {
+                    Task { await model.checkAllSubscriptions(onlyDue: false) }
+                } label: {
+                    Label(model.checkingSubscriptions.isEmpty ? "Check Subscriptions Now" : "Checking Subscriptions…",
+                          systemImage: "dot.radiowaves.left.and.right")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(!model.checkingSubscriptions.isEmpty)
+            }
 
             HStack {
                 Button("Open My Videos") { showMainWindow(.download) }

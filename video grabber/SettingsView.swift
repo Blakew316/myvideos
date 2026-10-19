@@ -11,10 +11,13 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             Tab("General", systemImage: "gearshape") { GeneralSettings() }
+            Tab("Downloads", systemImage: "arrow.down.circle") { DownloadSettings() }
             Tab("Accounts", systemImage: "person.crop.circle") { AccountSettings() }
+            Tab("Sync", systemImage: "icloud") { SyncSettings() }
             Tab("Components", systemImage: "shippingbox") { ComponentSettings() }
+            Tab("Advanced", systemImage: "wrench.and.screwdriver") { AdvancedSettings() }
         }
-        .frame(width: 540)
+        .frame(width: 560)
         .scenePadding()
     }
 }
@@ -37,10 +40,13 @@ private struct GeneralSettings: View {
                         Button("Choose…", action: chooseFolder)
                     }
                 }
-                Toggle("Add audio downloads to Apple Music", isOn: $prefs.addToMusic)
-                Toggle("Embed cover art and details", isOn: $prefs.embedArtwork)
+                Picker("Organize into folders", selection: $prefs.organize) {
+                    ForEach(OrganizeMode.allCases) { Text($0.displayName).tag($0) }
+                }
             } header: {
-                Text("Downloads")
+                Text("Saving")
+            } footer: {
+                Text(organizeExample).foregroundStyle(.secondary)
             }
 
             Section {
@@ -50,11 +56,31 @@ private struct GeneralSettings: View {
             } header: {
                 Text("Convenience")
             } footer: {
-                Text("You can also select a link in any app and choose Services → Download with My Videos, or use the Share menu.")
+                Text("You can also select a link in any app and choose Services → Download with My Videos, use the Share menu, or ask Siri to “Download a video with My Videos.”")
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Subscriptions") {
+                Picker("Check for new uploads", selection: $prefs.subscriptionInterval) {
+                    Text("Every 30 Minutes").tag(30)
+                    Text("Every Hour").tag(60)
+                    Text("Every 3 Hours").tag(180)
+                    Text("Every 6 Hours").tag(360)
+                    Text("Once a Day").tag(1440)
+                }
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var organizeExample: String {
+        let base = FileManager.default.displayName(atPath: prefs.destination.path)
+        switch prefs.organize {
+        case .none: return "Everything is saved directly in \(base)."
+        case .byType: return "For example: \(base) › Music › Song.m4a"
+        case .byChannel: return "For example: \(base) › Channel Name › Video.mp4"
+        case .byTypeAndChannel: return "For example: \(base) › Videos › Channel Name › Video.mp4"
+        }
     }
 
     private func chooseFolder() {
@@ -65,6 +91,50 @@ private struct GeneralSettings: View {
         panel.prompt = "Choose"
         panel.directoryURL = prefs.destination
         if panel.runModal() == .OK, let url = panel.url { prefs.destination = url }
+    }
+}
+
+// MARK: - Downloads
+
+private struct DownloadSettings: View {
+    @Bindable private var prefs = AppModel.shared.prefs
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Download at the same time", selection: $prefs.maxConcurrent) {
+                    Text("1 at a Time").tag(1)
+                    Text("2 at a Time").tag(2)
+                    Text("3 at a Time").tag(3)
+                }
+                Picker("Speed limit", selection: $prefs.speedLimit) {
+                    ForEach(SpeedLimit.allCases) { Text($0.displayName).tag($0) }
+                }
+            } header: {
+                Text("Queue")
+            } footer: {
+                Text("A speed limit keeps downloads from slowing down everything else on your network.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Embed cover art, details and chapters", isOn: $prefs.embedArtwork)
+                Picker("Sponsored segments", selection: $prefs.sponsorBlock) {
+                    ForEach(SponsorBlockMode.allCases) { Text($0.displayName).tag($0) }
+                }
+            } header: {
+                Text("Videos")
+            } footer: {
+                Text("Sponsored segments use the community-made SponsorBlock database and apply to YouTube videos.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Music") {
+                Toggle("Add audio downloads to Apple Music", isOn: $prefs.addToMusic)
+                Toggle("Find and add lyrics", isOn: $prefs.fetchLyrics)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -167,6 +237,66 @@ private struct AccountSettings: View {
     }
 }
 
+// MARK: - Sync
+
+private struct SyncSettings: View {
+    private var model: AppModel { AppModel.shared }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Sync with iCloud Drive", isOn: Binding(
+                    get: { model.prefs.iCloudSync },
+                    set: { model.setSyncEnabled($0) }))
+                    .disabled(SyncService.iCloudDrive == nil)
+                LabeledContent("Status") {
+                    statusView
+                }
+                if model.prefs.iCloudSync {
+                    HStack {
+                        Button("Sync Now") { Task { await model.sync.sync(model: model) } }
+                            .disabled(model.sync.status == .syncing)
+                        Spacer()
+                        if let folder = SyncService.folder {
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([folder])
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                Text("Keeps your download history, subscriptions and download settings the same on every Mac signed in to your iCloud account. Downloaded files themselves stay on the Mac that downloaded them. Each new upload from a subscription downloads once, on whichever Mac checks first.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var statusView: some View {
+        switch model.sync.status {
+        case .off:
+            Text("Off").foregroundStyle(.secondary)
+        case .unavailable:
+            Label("iCloud Drive is off", systemImage: "icloud.slash")
+                .foregroundStyle(.orange)
+                .help("Turn on iCloud Drive in System Settings → Apple Account → iCloud.")
+        case .syncing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Syncing…").foregroundStyle(.secondary)
+            }
+        case .synced(let date):
+            Label("Synced \(date.formatted(.relative(presentation: .named)))", systemImage: "checkmark.icloud")
+                .foregroundStyle(.secondary)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.icloud")
+                .foregroundStyle(.orange)
+                .lineLimit(2)
+        }
+    }
+}
+
 // MARK: - Components
 
 private struct ComponentSettings: View {
@@ -243,5 +373,61 @@ private struct ComponentSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Advanced
+
+private struct AdvancedSettings: View {
+    private var model: AppModel { AppModel.shared }
+    private var diagnostics: Diagnostics { Diagnostics.shared }
+    private var updater: AppUpdater { AppUpdater.shared }
+    @State private var confirmDelete = false
+
+    var body: some View {
+        Form {
+            Section("App Updates") {
+                LabeledContent("Version", value: updater.currentVersion)
+                if updater.isConfigured {
+                    Toggle("Check for updates automatically", isOn: Binding(
+                        get: { updater.automaticallyChecks },
+                        set: { updater.automaticallyChecks = $0 }))
+                    HStack {
+                        Spacer()
+                        Button("Check for Updates…") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheckForUpdates)
+                    }
+                } else {
+                    Text("Automatic updates are available in signed releases.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                LabeledContent("Saved reports", value: diagnostics.reports.isEmpty ? "None" : "\(diagnostics.reports.count)")
+                HStack {
+                    Button("Save Report…") {
+                        diagnostics.exportReport(activityLog: model.activityLog, toolchain: model.toolchain)
+                        diagnostics.markSeen()
+                    }
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.open(Diagnostics.folder)
+                    }
+                    Spacer()
+                    Button("Delete Reports", role: .destructive) { confirmDelete = true }
+                        .disabled(diagnostics.reports.isEmpty)
+                }
+            } header: {
+                Text("Diagnostics")
+            } footer: {
+                Text("If My Videos crashes or hangs, macOS records a report on this Mac. Nothing is sent anywhere — “Save Report…” creates a file you can choose to share, along with the activity log.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { diagnostics.reload() }
+        .confirmationDialog("Delete all saved reports?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) { diagnostics.deleteAll() }
+        }
     }
 }

@@ -19,6 +19,14 @@ struct MyVideosApp: App {
         .windowToolbarStyle(.unified)
         .commands { AppCommands() }
 
+        WindowGroup("Player", for: URL.self) { $url in
+            if let url {
+                PlayerView(url: url)
+            }
+        }
+        .defaultSize(width: 960, height: 600)
+        .windowToolbarStyle(.unified(showsTitle: true))
+
         Window("Sign In", id: "signin") {
             SignInView()
         }
@@ -53,6 +61,10 @@ private struct AppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
+            if AppUpdater.shared.isConfigured {
+                Button("Check for Updates…") { AppUpdater.shared.checkForUpdates() }
+                    .disabled(!AppUpdater.shared.canCheckForUpdates)
+            }
             Button("Check for yt-dlp Updates…") {
                 Task {
                     await model.toolchain.refresh()
@@ -75,6 +87,12 @@ private struct AppCommands: Commands {
                 if model.pasteFromClipboard() { model.downloadFromComposer() }
             }
             .keyboardShortcut("v", modifiers: [.command, .shift])
+            Button("Add Subscription…") {
+                show(.subscriptions)
+                model.subscribeRequest = .init(link: "")
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Convert Files…") { show(.convert) }
             Divider()
             Button("Sign In to a Site…") { openWindow(id: "signin") }
         }
@@ -82,6 +100,8 @@ private struct AppCommands: Commands {
             Button("Download") { show(.download) }.keyboardShortcut("1")
             Button("Queue") { show(.queue) }.keyboardShortcut("2")
             Button("History") { show(.history) }.keyboardShortcut("3")
+            Button("Subscriptions") { show(.subscriptions) }.keyboardShortcut("4")
+            Button("Convert") { show(.convert) }.keyboardShortcut("5")
             Divider()
         }
     }
@@ -95,6 +115,7 @@ private struct AppCommands: Commands {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppModel.shared.bootstrap()
+        _ = AppUpdater.shared
     }
 
     /// Stay running in the menu bar (or while downloading); otherwise quit with the window.
@@ -119,9 +140,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateCancel
     }
 
-    /// myvideos://download?url=… from the Share extension or a bookmarklet.
+    /// myvideos://download?url=… from the Share extension or Shortcuts; video and audio
+    /// files dropped on the Dock icon (or opened with My Videos) go to Convert.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls { AppModel.shared.handleIncoming(url) }
+        for url in urls where !url.isFileURL { AppModel.shared.handleIncoming(url) }
+        let files = urls.filter(\.isFileURL)
+        if !files.isEmpty { AppModel.shared.stage(files) }
         NSApp.activate()
     }
 }

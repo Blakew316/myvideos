@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		E1A0000000000000000000AB /* My Videos Share.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E1A0000000000000000000A1 /* My Videos Share.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		E1A0000000000000000000B3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E1A0000000000000000000B2 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 		D02C2B243084A630008BDC34 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				E1A0000000000000000000B3 /* Sparkle in Frameworks */,
 			);
 		};
 		E1A0000000000000000000A4 /* Frameworks */ = {
@@ -107,6 +109,9 @@
 				D02C2B293084A630008BDC34 /* video grabber */,
 			);
 			name = "video grabber";
+			packageProductDependencies = (
+				E1A0000000000000000000B2 /* Sparkle */,
+			);
 			productName = "video grabber";
 			productReference = D02C2B273084A630008BDC34 /* My Videos.app */;
 			productType = "com.apple.product-type.application";
@@ -156,6 +161,9 @@
 			);
 			mainGroup = D02C2B1E3084A630008BDC34;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E1A0000000000000000000B1 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D02C2B283084A630008BDC34 /* Products */;
 			projectDirPath = "";
@@ -472,6 +480,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		E1A0000000000000000000B1 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E1A0000000000000000000B2 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E1A0000000000000000000B1 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D02C2B1F3084A630008BDC34 /* Project object */;
 	validationLevel = 1;
