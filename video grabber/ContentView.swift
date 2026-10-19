@@ -73,9 +73,14 @@ struct ContentView: View {
         List(selection: $model.selection) {
             Section("Library") {
                 ForEach(LibraryFilter.allCases, id: \.self) { filter in
-                    Label(filter.title, systemImage: filter.symbol)
-                        .badge(filter == .all ? model.pendingCount : 0)
-                        .tag(SidebarItem.library(filter))
+                    Label {
+                        Text(filter.title)
+                    } icon: {
+                        Image(systemName: filter.symbol)
+                            .foregroundStyle(filter == .all ? Color.blue : filter == .videos ? Color.purple : Color.pink)
+                    }
+                    .badge(filter == .all ? model.pendingCount : 0)
+                    .tag(SidebarItem.library(filter))
                 }
             }
 
@@ -89,7 +94,11 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Label("All Channels", systemImage: "dot.radiowaves.left.and.right")
+                    Label {
+                        Text("All Channels")
+                    } icon: {
+                        Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.red)
+                    }
                         .badge(model.subscriptions.items.reduce(0) { $0 + $1.unseenCount })
                         .tag(SidebarItem.subscriptions)
                     ForEach(model.subscriptions.items) { sub in
@@ -124,7 +133,11 @@ struct ContentView: View {
             }
 
             Section("Tools") {
-                Label("Convert", systemImage: "wand.and.sparkles")
+                Label {
+                    Text("Convert")
+                } icon: {
+                    Image(systemName: "wand.and.sparkles").foregroundStyle(.orange)
+                }
                     .badge(model.stagedFiles.count + model.conversions.filter { $0.phase == .waiting || $0.phase == .converting }.count)
                     .tag(SidebarItem.convert)
             }

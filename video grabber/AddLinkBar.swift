@@ -39,7 +39,7 @@ struct AddLinkField: View {
                 }
             }
             .frame(width: 16)
-            TextField("Paste a link to download", text: $model.urlString)
+            TextField("Paste a link to a video or song", text: $model.urlString)
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
                 .focused($focused)
@@ -60,9 +60,33 @@ struct AddLinkField: View {
                 .buttonStyle(.plain)
                 .help("Clear")
             }
+            // A clear, labeled action — the field alone could be mistaken for search.
+            Button {
+                if model.isValidURL {
+                    model.addCardDismissedFor = nil
+                    if case .loaded = model.preview { model.downloadFromComposer() }
+                } else if model.urlString.isEmpty {
+                    model.pasteFromClipboard()
+                } else {
+                    focused = true
+                }
+            } label: {
+                Label(model.urlString.isEmpty ? "Paste" : "Download",
+                      systemImage: model.urlString.isEmpty ? "doc.on.clipboard" : "arrow.down")
+                    .font(.callout.weight(.semibold))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .foregroundStyle(.white)
+                    .background(Capsule().fill(Color.accentColor.gradient))
+                    .opacity(model.urlString.isEmpty || model.isValidURL ? 1 : 0.4)
+            }
+            .buttonStyle(.plain)
+            .help(model.urlString.isEmpty ? "Paste a copied link" : "Download this link")
         }
-        .padding(.horizontal, 10)
-        .frame(width: 460, height: 30)
+        .padding(.leading, 10)
+        .padding(.trailing, 4)
+        .frame(width: 520, height: 32)
         .popover(isPresented: cardPresented, arrowEdge: .bottom) {
             AddCard(model: model)
         }
@@ -287,6 +311,7 @@ struct DownloadsToolbarButton: View {
         Button {
             model.showDownloads.toggle()
         } label: {
+            HStack(spacing: 0) {
             ZStack {
                 Image(systemName: "arrow.down")
                     .font(.system(size: 12, weight: .bold))
@@ -312,7 +337,12 @@ struct DownloadsToolbarButton: View {
                         .offset(x: 9, y: -7)
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.leading, 2)
+            Text("Downloads")
+                .font(.callout)
+                .padding(.leading, 6)
+                .padding(.trailing, 4)
+            }
         }
         .help("Downloads")
         .accessibilityLabel("Downloads")

@@ -105,7 +105,22 @@ struct Snapshots {
             }
             .background(WindowBackdrop())
         }
-        render("library-empty", size: CGSize(width: 980, height: 700)) { LibraryView(model: model, filter: .music) }
+        render("library-top", size: CGSize(width: 980, height: 560)) {
+            VStack(alignment: .leading, spacing: 36) {
+                LibraryHero(item: items[0], filter: .all, play: {}, reveal: {})
+                QuickActions(model: model)
+            }
+            .padding(28)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(WindowBackdrop())
+        }
+        render("toolbar-controls", size: CGSize(width: 760, height: 70)) {
+            HStack(spacing: 20) {
+                AddLinkField(model: model)
+                DownloadsToolbarButton(model: model).buttonStyle(.bordered)
+            }
+            .padding(16)
+        }
         await model.toolchain.refresh()
         model.urlString = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
         for _ in 0..<40 where model.previewInfo == nil { try? await Task.sleep(for: .milliseconds(500)) }
