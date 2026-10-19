@@ -238,6 +238,12 @@ struct JobRow: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(job.url, forType: .string)
         }
+        if job.phase == .failed {
+            Button("Copy Error Details") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString("\(job.url)\n\(job.technicalError ?? job.statusLine)", forType: .string)
+            }
+        }
         Divider()
         Button("Remove from List", role: .destructive) { model.remove(job) }
     }

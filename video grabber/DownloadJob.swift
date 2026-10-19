@@ -38,6 +38,8 @@ final class DownloadJob: Identifiable {
     private(set) var itemCount = 0
     private(set) var savedFiles: [URL] = []
     private(set) var errorMessage: String?
+    /// yt-dlp's own error line, kept for "Copy Error Details".
+    private(set) var technicalError: String?
     var musicState: MusicState = .none
     /// How many songs got lyrics written into them.
     var lyricsCount = 0
@@ -340,6 +342,7 @@ final class DownloadJob: Identifiable {
     private func fail(_ message: String) {
         phase = .failed
         errorMessage = message
+        technicalError = lastError.isEmpty ? nil : lastError
         statusLine = message
         progressIsIndeterminate = false
         completion()
@@ -387,8 +390,11 @@ final class DownloadJob: Identifiable {
         if has("requested format is not available", "requested format not available", "no video formats found") {
             return "No downloadable stream was found. Try “Audio only”, or check that the link is a video page."
         }
-        if has("unsupported url", "no suitable", "unable to extract", "is not a valid url") {
-            return "This link isn’t supported. Make sure it points directly at a video. Updating yt-dlp can also help."
+        if has("unsupported url", "no suitable", "is not a valid url") {
+            return "No video was found at this link. Open the video itself (not a search, home or profile page) and copy its address."
+        }
+        if has("unable to extract") {
+            return "The site changed how it shows this video, so it couldn’t be read. Update yt-dlp in Settings → Components, or try again later. (\(Self.reason(lastError)))"
         }
         if has("ffmpeg", "ffprobe") {
             return "ffmpeg is missing or failed. Open Settings → Components to install it."
@@ -419,6 +425,15 @@ final class DownloadJob: Identifiable {
     }
 
     // MARK: - Helpers
+
+    /// "ERROR: [youtube] abc: Unable to extract …" → "Unable to extract …"
+    static func reason(_ line: String) -> String {
+        var text = line.replacingOccurrences(of: "ERROR:", with: "").trimmingCharacters(in: .whitespaces)
+        if let range = text.range(of: #"^\[[^\]]+\]\s*[^:]*:\s*"#, options: .regularExpression) {
+            text.removeSubrange(range)
+        }
+        return text.count > 160 ? String(text.prefix(160)) + "…" : text
+    }
 
     private static var regexCache: [String: NSRegularExpression] = [:]
 
