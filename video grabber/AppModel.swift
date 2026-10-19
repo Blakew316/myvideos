@@ -361,33 +361,60 @@ final class AppModel {
         return args
     }
 
+    /// Looks a link up, falling back the same way downloads do (without the browser
+    /// sign-in, then without impersonation) before giving up.
     private func fetchInfo(url: String, playlist: Bool) async -> PreviewState {
         guard let tool = toolchain.ytdlp else { return .failed("yt-dlp isn’t installed.") }
-        var args = ["-J", "--flat-playlist", playlist ? "--yes-playlist" : "--no-playlist"]
-        args += await baseFetchArguments()
-        args += ["--", LinkRewrite.forDownloader(url)]
-        do {
-            let output = try await ProcessRunner.run(tool, args)
-            if Task.isCancelled { return .empty }
-            if output.status == 0, let info = MediaInfo.parse(output.stdout) {
-                return .loaded(info)
+        let cookies = await cookieArguments(for: prefs.baseOptions)
+        var firstError = ""
+        for attempt in DownloadJob.plan(cookieArguments: cookies, impersonate: toolchain.impersonationAvailable) {
+            var args = ["-J", "--flat-playlist", playlist ? "--yes-playlist" : "--no-playlist",
+                        "--no-warnings", "--socket-timeout", "20"]
+            if attempt.impersonate { args += ["--impersonate", "chrome"] }
+            args += attempt.cookieArguments
+            args += ["--", LinkRewrite.forDownloader(url)]
+            do {
+                let output = try await ProcessRunner.run(tool, args)
+                if Task.isCancelled { return .empty }
+                if output.status == 0, let info = MediaInfo.parse(output.stdout) {
+                    return .loaded(info)
+                }
+                let error = output.stderr.split(separator: "\n").last { $0.contains("ERROR") }.map(String.init) ?? ""
+                if firstError.isEmpty { firstError = error }
+                if DownloadJob.isFinal(error) { break }
+            } catch {
+                return .failed("Couldn’t run yt-dlp: \(error.localizedDescription)")
             }
-            return .failed(Self.describeFetchError(output.stderr))
-        } catch {
-            return .failed("Couldn’t load details for this link.")
         }
+        return .failed(Self.describeFetchError(firstError, url: url))
     }
 
-    private static func describeFetchError(_ stderr: String) -> String {
-        let error = stderr.split(separator: "\n").last { $0.contains("ERROR") }.map(String.init) ?? ""
-        if error.localizedCaseInsensitiveContains("unsupported url") { return "This site isn’t supported." }
-        if error.localizedCaseInsensitiveContains("sign in") || error.localizedCaseInsensitiveContains("private")
-            || error.localizedCaseInsensitiveContains("logged-in") {
-            return "This needs you to be signed in."
+    /// One sentence saying why a link couldn't be looked up — yt-dlp's own reason when
+    /// it isn't one of the common cases.
+    static func describeFetchError(_ error: String, url: String) -> String {
+        let text = error.lowercased()
+        func has(_ needles: String...) -> Bool { needles.contains { text.contains($0) } }
+        let host = URL(string: url)?.host(percentEncoded: false)?.replacingOccurrences(of: "www.", with: "") ?? "the site"
+        if has("unsupported url", "is not a valid url") { return "This site isn’t supported." }
+        if has("ip address is blocked", "not available in your country", "geo restrict", "geo-restrict", "not available in your region") {
+            return "This isn’t available where you are: \(host) blocks it for your location or network."
         }
-        if error.localizedCaseInsensitiveContains("unavailable") || error.localizedCaseInsensitiveContains("does not exist") {
-            return "This video is unavailable."
+        if has("sign in", "private", "logged-in", "login required", "requires authentication", "age-restricted", "members-only") {
+            return "This needs you to be signed in. Choose a sign-in under Settings › Accounts."
         }
+        if has("video unavailable", "is unavailable", "does not exist", "has been removed", "no longer available", "not available") {
+            return "This video has been removed or made private."
+        }
+        if has("connection reset", "recv failure", "timed out", "getaddrinfo", "failed to resolve", "network is unreachable",
+               "couldn't connect", "could not connect") {
+            return "Couldn’t connect to \(host). If other sites work, \(host) may be blocked on this network."
+        }
+        if has("http error 429", "too many requests") { return "\(host) is limiting requests. Wait a few minutes and try again." }
+        if has("cannot parse data", "unable to extract", "unable to parse") {
+            return "yt-dlp can’t read this \(host) page right now. A yt-dlp update usually fixes this."
+        }
+        if has("drm") { return "This video is copy-protected (DRM)." }
+        if !error.isEmpty { return DownloadJob.reason(error) }
         return "Couldn’t load details for this link."
     }
 
@@ -789,7 +816,8 @@ final class AppModel {
                 return .failure("Couldn’t check this channel.")
             }
             guard output.status == 0, let feed = FeedParser.parse(output.stdout) else {
-                return .failure(Self.describeFetchError(output.stderr))
+                let error = output.stderr.split(separator: "\n").last { $0.contains("ERROR") }.map(String.init) ?? ""
+                return .failure(Self.describeFetchError(error, url: url))
             }
             if let tab = feed.videosTabURL {
                 url = tab
@@ -956,9 +984,9 @@ final class AppModel {
               let next = conversions.first(where: { $0.phase == .waiting }) else { return }
         guard let ffmpeg = toolchain.ffmpeg else {
             for job in conversions where job.phase == .waiting {
-                job.fail("ffmpeg isn’t installed. Install it in Settings → Components.")
+                job.fail("ffmpeg isn’t installed. Install it in Settings › Advanced.")
             }
-            alert = AppAlert(title: "ffmpeg Isn’t Installed", message: "Install it in Settings → Components to convert files.")
+            alert = AppAlert(title: "ffmpeg Isn’t Installed", message: "Install it in Settings › Advanced to convert files.")
             return
         }
         appendLog("$ ffmpeg (\(next.preset.title)) \(next.input.lastPathComponent)")

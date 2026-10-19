@@ -44,7 +44,7 @@ struct ComposerFlow {
             model.downloadFromComposer()
             for _ in 0..<120 where model.jobs.contains(where: { !$0.isDone }) { await spin(0.5) }
             let job = try #require(model.jobs.last)
-            #expect(job.phase == .finished, "\(quality.rawValue): \(job.statusLine)")
+            #expect(job.phase == .finished, "\(quality.rawValue): \(job.statusLine) || \(job.technicalError ?? "-")")
             await spin(2)
         }
         window.orderOut(nil)

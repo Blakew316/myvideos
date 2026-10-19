@@ -72,12 +72,48 @@ final class DownloadJob: Identifiable {
     private var streamCount = 1
     private var streamIndex = -1
     private var impersonating = false
+    /// A network failure was seen in this attempt's output.
+    private var networkTrouble = false
     private var toolchain: Toolchain?
     private var converter: PlayableConverter?
     /// Cover art yt-dlp wrote before embedding it; left behind if the download fails.
     private var thumbnailFiles: [URL] = []
     private var log: (String) -> Void = { _ in }
     private var completion: () -> Void = {}
+    /// Other ways to try when an attempt fails: without the browser sign-in (stale or
+    /// mismatched cookies break some sites) and without browser impersonation (some
+    /// sites reset impersonated connections).
+    private var fallbacks: [Attempt] = []
+    /// Every attempt's error, for Copy Error Details.
+    private var attemptErrors: [String] = []
+
+    struct Attempt: Equatable {
+        var cookieArguments: [String]
+        var impersonate: Bool
+        var note: String = ""
+    }
+
+    /// The attempts to make, in order, for the given sign-in and impersonation settings.
+    nonisolated static func plan(cookieArguments: [String], impersonate: Bool) -> [Attempt] {
+        var attempts = [Attempt(cookieArguments: cookieArguments, impersonate: impersonate)]
+        if !cookieArguments.isEmpty {
+            attempts.append(Attempt(cookieArguments: [], impersonate: impersonate,
+                                    note: "Trying again without your browser sign-in…"))
+        }
+        if impersonate {
+            attempts.append(Attempt(cookieArguments: cookieArguments, impersonate: false,
+                                    note: "Trying again with a standard connection…"))
+        }
+        return attempts
+    }
+
+    /// Failures another attempt can't fix: retrying would only waste time.
+    nonisolated static func isFinal(_ error: String) -> Bool {
+        let text = error.lowercased()
+        return ["drm", "widevine", "fairplay", "playready", "unsupported url", "is not a valid url",
+                "no space left", "permission denied", "read-only file system", "unable to rename",
+                "ffmpeg not found", "ffprobe not found"].contains { text.contains($0) }
+    }
 
     init(url: String, options: DownloadOptions, info: MediaInfo?, tags: MusicTags) {
         self.url = url
@@ -97,7 +133,7 @@ final class DownloadJob: Identifiable {
         reset()
 
         guard let tool = toolchain.ytdlp else {
-            fail("yt-dlp isn’t installed. Open Settings → Components to install it.")
+            fail("yt-dlp isn’t installed. Open Settings › Advanced to install it.")
             return
         }
         if ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil {
@@ -110,14 +146,22 @@ final class DownloadJob: Identifiable {
         }
         try? FileManager.default.createDirectory(at: options.destination, withIntermediateDirectories: true)
 
+        var attempts = Self.plan(cookieArguments: cookieArguments, impersonate: toolchain.impersonationAvailable)
+        let first = attempts.removeFirst()
+        fallbacks = attempts
+        attemptErrors = []
+        launch(first, tool: tool)
+    }
+
+    private func launch(_ attempt: Attempt, tool: URL) {
         let printFile = FileManager.default.temporaryDirectory
             .appendingPathComponent("my-videos-\(id.uuidString).txt")
         self.printFile = printFile
-        impersonating = toolchain.impersonationAvailable
+        impersonating = attempt.impersonate
         let args = options.arguments(url: url,
-                                     ffmpegDirectory: toolchain.ffmpeg?.deletingLastPathComponent(),
-                                     impersonate: impersonating,
-                                     cookieArguments: cookieArguments,
+                                     ffmpegDirectory: toolchain?.ffmpeg?.deletingLastPathComponent(),
+                                     impersonate: attempt.impersonate,
+                                     cookieArguments: attempt.cookieArguments,
                                      printFile: printFile)
 
         let process = StreamingProcess(executable: tool, arguments: args)
@@ -133,7 +177,8 @@ final class DownloadJob: Identifiable {
         }
         self.process = process
         phase = .preparing
-        statusLine = "Connecting…"
+        statusLine = attempt.note.isEmpty ? "Connecting…" : attempt.note
+        if !attempt.note.isEmpty { log(attempt.note) }
         log("$ yt-dlp \(args.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " "))")
     }
 
@@ -191,6 +236,7 @@ final class DownloadJob: Identifiable {
         thumbnailFiles = []
         errorMessage = nil
         lastError = ""
+        networkTrouble = false
         cancelRequested = false
         pauseRequested = false
         streamCount = 1
@@ -208,6 +254,14 @@ final class DownloadJob: Identifiable {
 
             if line.hasPrefix("ERROR:") || line.contains(" ERROR:") {
                 lastError = line
+            }
+            // ffmpeg fetches clips itself; its network failures come before a bare
+            // "ffmpeg exited with code …" that would otherwise read as a broken ffmpeg.
+            let lower = line.lowercased()
+            if lower.contains("operation timed out") || lower.contains("could not resolve host")
+                || lower.contains("connection refused") || lower.contains("network is unreachable")
+                || (lower.contains("error opening input") && lower.contains("http")) {
+                networkTrouble = true
             }
             if line.contains("Writing video thumbnail"), let path = line.components(separatedBy: " to: ").last {
                 thumbnailFiles.append(URL(fileURLWithPath: path))
@@ -342,6 +396,17 @@ final class DownloadJob: Identifiable {
             succeed(status: status)
             return
         } else {
+            if !lastError.isEmpty { attemptErrors.append(lastError) }
+            if !Self.isFinal(lastError), !fallbacks.isEmpty, let tool = toolchain?.ytdlp {
+                let next = fallbacks.removeFirst()
+                lastError = ""
+                networkTrouble = false
+                streamCount = 1
+                streamIndex = -1
+                progressIsIndeterminate = true
+                launch(next, tool: tool)
+                return
+            }
             fail(friendlyError(code: status))
             return
         }
@@ -402,7 +467,8 @@ final class DownloadJob: Identifiable {
         thumbnailFiles = []
         phase = .failed
         errorMessage = message
-        technicalError = lastError.isEmpty ? nil : lastError
+        let errors = attemptErrors.isEmpty ? [lastError].filter { !$0.isEmpty } : attemptErrors
+        technicalError = errors.isEmpty ? nil : errors.joined(separator: "\n")
         statusLine = message
         progressIsIndeterminate = false
         completion()
@@ -431,9 +497,15 @@ final class DownloadJob: Identifiable {
         let haystack = lastError.lowercased()
         func has(_ needles: String...) -> Bool { needles.contains { haystack.contains($0) } }
 
-        if has("getaddrinfo", "network is unreachable", "failed to resolve", "connection reset",
-               "timed out", "temporary failure in name resolution", "unable to download webpage: <urlopen") {
-            return "Network problem — check your internet connection and try again."
+        if has("ip address is blocked", "not available in your country", "geo restrict", "geo-restrict",
+               "not available in your region", "blocked it in your country") {
+            return "This video isn’t available where you are. The site blocks it for your location or network."
+        }
+        if networkTrouble || has("getaddrinfo", "network is unreachable", "failed to resolve", "connection reset",
+               "timed out", "temporary failure in name resolution", "unable to download webpage: <urlopen",
+               "recv failure", "couldn't connect", "could not connect", "could not resolve host") {
+            let host = URL(string: url)?.host(percentEncoded: false)?.replacingOccurrences(of: "www.", with: "") ?? "the site"
+            return "Couldn’t connect to \(host). Check your internet connection; if other sites work, \(host) may be blocked on this network."
         }
         if has("http error 429", "too many requests") {
             return "The site is limiting requests right now. Wait a few minutes, then try again."
@@ -441,7 +513,7 @@ final class DownloadJob: Identifiable {
         if has("http error 403", "403: forbidden", "403 forbidden", "cloudflare") {
             return impersonating
                 ? "The site blocked the download. It may require you to sign in (Settings → Accounts)."
-                : "The site blocked the download. Updating yt-dlp in Settings → Components often fixes this."
+                : "The site blocked the download. Updating yt-dlp in Settings › Advanced often fixes this."
         }
         if has("sign in to confirm", "age-restricted", "age restricted", "not a bot", "login required",
                "requires authentication", "logged-in", "logged in", "private video", "members-only", "join this channel") {
@@ -453,14 +525,21 @@ final class DownloadJob: Identifiable {
         if has("requested format is not available", "requested format not available", "no video formats found") {
             return "No downloadable stream was found. Try “Audio only”, or check that the link is a video page."
         }
+        if has("video unavailable", "this video is unavailable", "has been removed", "does not exist", "post is not available",
+               "content isn't available", "no longer available") {
+            return "This video has been removed or made private, so it can’t be downloaded."
+        }
         if has("unsupported url", "no suitable", "is not a valid url") {
             return "No video was found at this link. Open the video itself (not a search, home or profile page) and copy its address."
         }
-        if has("unable to extract") {
-            return "The site changed how it shows this video, so it couldn’t be read. Update yt-dlp in Settings → Components, or try again later. (\(Self.reason(lastError)))"
+        if has("unable to extract", "cannot parse data", "unable to parse") {
+            return "The site changed how it shows this video, so it couldn’t be read. Update yt-dlp in Settings › Advanced, or try again later. (\(Self.reason(lastError)))"
+        }
+        if has("ffmpeg not found", "ffprobe not found", "ffmpeg is not installed") {
+            return "ffmpeg is missing. Open Settings › Advanced to install it."
         }
         if has("ffmpeg", "ffprobe") {
-            return "ffmpeg is missing or failed. Open Settings → Components to install it."
+            return "ffmpeg couldn’t process this video (\(Self.reason(lastError))). Try another quality, or download without clipping."
         }
         if has("unable to rename", "permission denied", "read-only file system", "no space left") {
             return "Couldn’t save the file — check the folder’s permissions and free space."
