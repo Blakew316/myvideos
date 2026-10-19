@@ -13,14 +13,12 @@ struct SettingsView: View {
         TabView {
             Tab("General", systemImage: "gearshape") { GeneralSettings() }
             Tab("Downloads", systemImage: "arrow.down.circle") { DownloadSettings() }
+            Tab("Channels", systemImage: "person.2") { ChannelSettings() }
             Tab("Accounts", systemImage: "person.crop.circle") { AccountSettings() }
-            Tab("iPhone", systemImage: "iphone") { CompanionSettings() }
-            Tab("Sync", systemImage: "icloud") { SyncSettings() }
-            Tab("Components", systemImage: "shippingbox") { ComponentSettings() }
-            Tab("Advanced", systemImage: "wrench.and.screwdriver") { AdvancedSettings() }
+            Tab("Devices", systemImage: "laptopcomputer.and.iphone") { DeviceSettings() }
+            Tab("Advanced", systemImage: "gearshape.2") { AdvancedSettings() }
         }
-        .frame(width: 600)
-        .scenePadding()
+        .frame(width: 620)
     }
 }
 
@@ -32,17 +30,6 @@ private struct GeneralSettings: View {
 
     /// A bookmark whose “address” sends the current page to My Videos.
     static let bookmarklet = "javascript:location.href='myvideos://download?url='+encodeURIComponent(location.href)"
-
-    private var subscriptionFooter: String {
-        var parts: [String] = []
-        if prefs.subscriptionsOnlyAtNight {
-            parts.append("New uploads download between \(QuietHours.hourLabel(prefs.quietStartHour)) and \(QuietHours.hourLabel(prefs.quietEndHour)) while your Mac is awake. “Check Now” always works.")
-        }
-        if prefs.cleanupAfterDays > 0 {
-            parts.append("Only videos you’ve opened are moved to the Trash — unwatched ones stay.")
-        }
-        return parts.isEmpty ? "Subscriptions check for new uploads while My Videos is open." : parts.joined(separator: " ")
-    }
 
     var body: some View {
         Form {
@@ -74,40 +61,8 @@ private struct GeneralSettings: View {
             } header: {
                 Text("Convenience")
             } footer: {
-                Text("You can also select a link in any app and choose Services → Download with My Videos, use the Share menu, or ask Siri to “Download a video with My Videos.”")
+                Text("You can also send links from the Share menu, Services or Siri.")
                     .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Picker("Check for new uploads", selection: $prefs.subscriptionInterval) {
-                    Text("Every 30 Minutes").tag(30)
-                    Text("Every Hour").tag(60)
-                    Text("Every 3 Hours").tag(180)
-                    Text("Every 6 Hours").tag(360)
-                    Text("Once a Day").tag(1440)
-                }
-                Toggle("Only download during set hours", isOn: $prefs.subscriptionsOnlyAtNight)
-                if prefs.subscriptionsOnlyAtNight {
-                    HStack {
-                        Picker("From", selection: $prefs.quietStartHour) {
-                            ForEach(0..<24, id: \.self) { Text(QuietHours.hourLabel($0)).tag($0) }
-                        }
-                        Picker("to", selection: $prefs.quietEndHour) {
-                            ForEach(0..<24, id: \.self) { Text(QuietHours.hourLabel($0)).tag($0) }
-                        }
-                    }
-                }
-                Toggle("Wait when on a phone hotspot or Low Data Mode", isOn: $prefs.avoidMeteredNetworks)
-                Picker("After watching, move to Trash", selection: $prefs.cleanupAfterDays) {
-                    Text("Never").tag(0)
-                    Text("After 1 Day").tag(1)
-                    Text("After 1 Week").tag(7)
-                    Text("After 30 Days").tag(30)
-                }
-            } header: {
-                Text("Subscriptions")
-            } footer: {
-                Text(subscriptionFooter).foregroundStyle(.secondary)
             }
 
             Section {
@@ -123,7 +78,7 @@ private struct GeneralSettings: View {
             } header: {
                 Text("Browser")
             } footer: {
-                Text("Adds a one-click “Download” button to your browser’s Favorites bar. In Safari: choose Bookmarks › Add Bookmark, save it to Favorites, then choose Bookmarks › Edit Bookmarks and paste the copied code as its address. The Share button in Safari’s toolbar also offers My Videos.")
+                Text("Adds a one-click Download bookmark to your Favorites bar: add any bookmark to Favorites, then paste the copied code as its address.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -151,13 +106,117 @@ private struct GeneralSettings: View {
     }
 }
 
+// MARK: - Channels
+
+private struct ChannelSettings: View {
+    @Bindable private var prefs = AppModel.shared.prefs
+
+    private var subscriptionFooter: String {
+        var parts: [String] = []
+        if prefs.subscriptionsOnlyAtNight {
+            parts.append("New uploads download between \(QuietHours.hourLabel(prefs.quietStartHour)) and \(QuietHours.hourLabel(prefs.quietEndHour)) while your Mac is awake. “Check Now” always works.")
+        }
+        if prefs.cleanupAfterDays > 0 {
+            parts.append("Only videos you’ve opened are moved to the Trash — unwatched ones stay.")
+        }
+        return parts.isEmpty ? "Subscriptions check for new uploads while My Videos is open." : parts.joined(separator: " ")
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Check for new uploads", selection: $prefs.subscriptionInterval) {
+                    Text("Every 30 Minutes").tag(30)
+                    Text("Every Hour").tag(60)
+                    Text("Every 3 Hours").tag(180)
+                    Text("Every 6 Hours").tag(360)
+                    Text("Once a Day").tag(1440)
+                }
+                Toggle("Only download during set hours", isOn: $prefs.subscriptionsOnlyAtNight)
+                if prefs.subscriptionsOnlyAtNight {
+                    HStack {
+                        Picker("From", selection: $prefs.quietStartHour) {
+                            ForEach(0..<24, id: \.self) { Text(QuietHours.hourLabel($0)).tag($0) }
+                        }
+                        Picker("to", selection: $prefs.quietEndHour) {
+                            ForEach(0..<24, id: \.self) { Text(QuietHours.hourLabel($0)).tag($0) }
+                        }
+                    }
+                }
+                Toggle("Wait when on a phone hotspot or Low Data Mode", isOn: $prefs.avoidMeteredNetworks)
+                Picker("After watching, move to Trash", selection: $prefs.cleanupAfterDays) {
+                    Text("Never").tag(0)
+                    Text("After 1 Day").tag(1)
+                    Text("After 1 Week").tag(7)
+                    Text("After 30 Days").tag(30)
+                }
+            } header: {
+                Text("New Uploads")
+            } footer: {
+                Text(subscriptionFooter).foregroundStyle(.secondary)
+            }
+
+        }
+        .formStyle(.grouped)
+    }
+}
+
 // MARK: - Downloads
 
 private struct DownloadSettings: View {
     @Bindable private var prefs = AppModel.shared.prefs
+    /// Shared with the New Download sheet, which remembers the last video quality.
+    @AppStorage("lastVideoQuality") private var lastVideoQuality = DownloadQuality.best.rawValue
+
+    private var downloadsAudio: Binding<Bool> {
+        Binding {
+            prefs.quality == .audio
+        } set: { audio in
+            if audio {
+                if prefs.quality != .audio { lastVideoQuality = prefs.quality.rawValue }
+                prefs.quality = .audio
+            } else {
+                prefs.quality = DownloadQuality(rawValue: lastVideoQuality).flatMap { $0 == .audio ? nil : $0 } ?? .best
+            }
+        }
+    }
 
     var body: some View {
         Form {
+            Section {
+                Picker("Download as", selection: downloadsAudio) {
+                    Text("Video").tag(false)
+                    Text("Audio").tag(true)
+                }
+                .pickerStyle(.segmented)
+                if prefs.quality == .audio {
+                    Picker("Format", selection: $prefs.audioFormat) {
+                        ForEach(AudioFormat.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Picker("Quality", selection: $prefs.audioBitrate) {
+                        ForEach(AudioBitrate.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .disabled(prefs.audioFormat == .wav)
+                } else {
+                    Picker("Quality", selection: $prefs.quality) {
+                        ForEach(DownloadQuality.allCases.filter { $0 != .audio }) { Text($0.displayName).tag($0) }
+                    }
+                    Picker("Subtitles", selection: $prefs.subtitles) {
+                        ForEach(SubtitleMode.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    if prefs.subtitles != .off {
+                        Picker("Subtitle language", selection: $prefs.subtitleLanguage) {
+                            ForEach(SubtitleLanguage.allCases) { Text($0.displayName).tag($0) }
+                        }
+                    }
+                }
+            } header: {
+                Text("New Downloads")
+            } footer: {
+                Text("What a new download starts with. You can change it for any download before it starts.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("Download at the same time", selection: $prefs.maxConcurrent) {
                     Text("1 at a Time").tag(1)
@@ -235,7 +294,17 @@ private struct AccountSettings: View {
     }
 }
 
-// MARK: - iPhone
+// MARK: - Devices
+
+private struct DeviceSettings: View {
+    var body: some View {
+        Form {
+            SyncSettings()
+            CompanionSettings()
+        }
+        .formStyle(.grouped)
+    }
+}
 
 private struct CompanionSettings: View {
     private var model: AppModel { AppModel.shared }
@@ -248,13 +317,15 @@ private struct CompanionSettings: View {
     private var link: String { "http://\(host):\(port)/?code=\(pairing.code)" }
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 Toggle("Use My Videos on iPhone and iPad", isOn: Binding(
                     get: { model.prefs.companionEnabled },
                     set: { model.setCompanionEnabled($0) }))
+            } header: {
+                Text("iPhone and iPad")
             } footer: {
-                Text("Send links, follow your downloads, play them and save them to your iPhone — over your home Wi-Fi. Your Mac does the downloading, so keep My Videos open (it can stay in the menu bar).")
+                Text("Send links, follow downloads and watch them on your iPhone over your home Wi-Fi. Your Mac does the downloading, so keep My Videos open (it can stay in the menu bar).")
                     .foregroundStyle(.secondary)
             }
 
@@ -316,7 +387,6 @@ private struct CompanionSettings: View {
                 }
             }
         }
-        .formStyle(.grouped)
         .confirmationDialog("Disconnect all iPhones and iPads?", isPresented: $confirmReset) {
             Button("Disconnect", role: .destructive) { pairing.reset() }
         } message: {
@@ -359,8 +429,7 @@ private struct SyncSettings: View {
     private var model: AppModel { AppModel.shared }
 
     var body: some View {
-        Form {
-            Section {
+        Section {
                 Toggle("Sync with iCloud Drive", isOn: Binding(
                     get: { model.prefs.iCloudSync },
                     set: { model.setSyncEnabled($0) }))
@@ -380,12 +449,12 @@ private struct SyncSettings: View {
                         }
                     }
                 }
+            } header: {
+                Text("Your Other Macs")
             } footer: {
-                Text("Keeps your download history, subscriptions and download settings the same on every Mac signed in to your iCloud account. Downloaded files themselves stay on the Mac that downloaded them. Each new upload from a subscription downloads once, on whichever Mac checks first.")
+                Text("Keeps your library, watched progress, collections, channels and download settings the same on every Mac using your iCloud account. Files stay on the Mac that downloaded them.")
                     .foregroundStyle(.secondary)
             }
-        }
-        .formStyle(.grouped)
     }
 
     @ViewBuilder
@@ -420,7 +489,7 @@ private struct ComponentSettings: View {
     private var toolchain: Toolchain { AppModel.shared.toolchain }
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 LabeledContent("yt-dlp") {
                     VStack(alignment: .trailing, spacing: 2) {
@@ -488,7 +557,6 @@ private struct ComponentSettings: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
     }
 }
 
@@ -502,6 +570,8 @@ private struct AdvancedSettings: View {
 
     var body: some View {
         Form {
+            ComponentSettings()
+
             Section("App Updates") {
                 LabeledContent("Version", value: updater.currentVersion)
                 if updater.isConfigured {
@@ -536,7 +606,7 @@ private struct AdvancedSettings: View {
             } header: {
                 Text("Diagnostics")
             } footer: {
-                Text("If My Videos crashes or hangs, macOS records a report on this Mac. Nothing is sent anywhere — “Save Report…” creates a file you can choose to share, along with the activity log.")
+                Text("Reports stay on this Mac. Save Report creates a file, with the activity log, that you can choose to share.")
                     .foregroundStyle(.secondary)
             }
         }
