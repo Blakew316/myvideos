@@ -7,8 +7,8 @@ import SwiftUI
 import AppKit
 import Combine
 
-/// The main window: Library and Channels in the sidebar, the link field and Downloads
-/// button in the toolbar, and an optional Activity inspector for technical details.
+/// The main window: Library and Channels in the sidebar, the Downloads button in the
+/// toolbar, and an optional Activity inspector for technical details.
 struct ContentView: View {
     @Bindable private var model = AppModel.shared
 
@@ -17,16 +17,13 @@ struct ContentView: View {
             sidebar
         } detail: {
             detail
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        DownloadsToolbarButton(model: model)
+                    }
+                }
         }
         .frame(minWidth: 900, minHeight: 620)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                AddLinkField(model: model)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                DownloadsToolbarButton(model: model)
-            }
-        }
         .inspector(isPresented: $model.showActivity) {
             ActivityInspector(log: model.activityLog)
                 .inspectorColumnWidth(min: 280, ideal: 360, max: 600)
@@ -74,12 +71,7 @@ struct ContentView: View {
         List(selection: $model.selection) {
             Section("Library") {
                 ForEach(LibraryFilter.allCases, id: \.self) { filter in
-                    Label {
-                        Text(filter.title)
-                    } icon: {
-                        Image(systemName: filter.symbol)
-                            .foregroundStyle(filter == .all ? Color.blue : filter == .videos ? Color.purple : Color.pink)
-                    }
+                    Label(filter.title, systemImage: filter.symbol)
                     .badge(filter == .all ? model.pendingCount : 0)
                     .tag(SidebarItem.library(filter))
                 }
@@ -90,16 +82,12 @@ struct ContentView: View {
                     Button {
                         model.subscribeRequest = .init(link: "")
                     } label: {
-                        Label("Follow a Channel…", systemImage: "plus.circle")
+                        Label("Follow a Channel", systemImage: "plus")
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Label {
-                        Text("All Channels")
-                    } icon: {
-                        Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.red)
-                    }
+                    Label("All Channels", systemImage: "person.2")
                         .badge(model.subscriptions.items.reduce(0) { $0 + $1.unseenCount })
                         .tag(SidebarItem.subscriptions)
                     ForEach(model.subscriptions.items) { sub in
@@ -134,11 +122,7 @@ struct ContentView: View {
             }
 
             Section("Tools") {
-                Label {
-                    Text("Convert")
-                } icon: {
-                    Image(systemName: "wand.and.sparkles").foregroundStyle(.orange)
-                }
+                Label("Convert", systemImage: "arrow.triangle.2.circlepath")
                     .badge(model.stagedFiles.count + model.conversions.filter { $0.phase == .waiting || $0.phase == .converting }.count)
                     .tag(SidebarItem.convert)
             }
@@ -149,9 +133,11 @@ struct ContentView: View {
     }
 }
 
-/// "12 items · 4.2 GB" at the foot of the sidebar; click for Storage.
+/// The library's footprint at the foot of the sidebar, with a slim meter; click for Storage.
 private struct LibrarySummary: View {
     let model: AppModel
+    @State private var hovering = false
+    @State private var available: Int64?
 
     var body: some View {
         let items = model.history.items
@@ -159,24 +145,43 @@ private struct LibrarySummary: View {
         Button {
             model.showStorage = true
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "internaldrive")
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(items.count) item\(items.count == 1 ? "" : "s")")
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Storage")
                         .font(.caption.weight(.semibold))
-                    Text(bytes > 0 ? "\(ByteSize.string(Double(bytes))) on this Mac" : "Nothing saved yet")
-                        .font(.caption2)
+                    Spacer()
+                    Text(bytes > 0 ? ByteSize.string(Double(bytes)) : "Empty")
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
+                GeometryReader { geo in
+                    let total = Double(bytes + (available ?? 0))
+                    let fraction = total > 0 ? Double(bytes) / total : 0
+                    Capsule().fill(Color.primary.opacity(0.1))
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(Color.accentColor)
+                                .frame(width: bytes > 0 ? max(4, geo.size.width * fraction) : 0)
+                        }
+                }
+                .frame(height: 4)
+                Text("\(items.count) item\(items.count == 1 ? "" : "s")" + (available.map { " · \(ByteSize.string(Double($0))) free" } ?? ""))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(12)
+            .background(Color.primary.opacity(hovering ? 0.07 : 0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
         .help("Storage")
+        .task(id: items.count) {
+            let values = try? URL(fileURLWithPath: NSHomeDirectory())
+                .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            available = values?.volumeAvailableCapacityForImportantUsage
+        }
     }
 }
 

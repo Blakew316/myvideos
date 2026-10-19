@@ -2,18 +2,19 @@
 //  AddLinkBar.swift
 //  My Videos
 //
-//  Adding is a quick action, not a destination: a link field in the toolbar (like Safari's
-//  address bar) drops down a card to confirm, and a Downloads button tracks activity.
+//  Adding is a quick action, not a destination: a link bar at the top of Home drops down
+//  a card to confirm, and a Downloads button in the toolbar tracks activity.
 //
 
 import SwiftUI
 import AppKit
 
-// MARK: - Toolbar link field
+// MARK: - Link bar
 
 struct AddLinkField: View {
     @Bindable var model: AppModel
     @FocusState private var focused: Bool
+    @State private var hovering = false
 
     /// The card appears once the link has been looked up — never mid-typing.
     private var cardPresented: Binding<Bool> {
@@ -29,69 +30,84 @@ struct AddLinkField: View {
     }
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 12) {
             Group {
                 if model.preview == .loading {
-                    ProgressView().controlSize(.mini)
+                    ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: "link")
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(focused ? Color.accentColor : .secondary)
                 }
             }
-            .frame(width: 16)
-            TextField("Paste a link to a video or song", text: $model.urlString)
+            .frame(width: 22)
+            TextField("Paste a link to a video, playlist or song", text: $model.urlString)
                 .textFieldStyle(.plain)
+                .font(.system(size: 16))
                 .autocorrectionDisabled()
                 .focused($focused)
-                .onSubmit {
-                    if model.isValidURL {
-                        model.addCardDismissedFor = nil
-                        if case .loaded = model.preview { model.downloadFromComposer() }
-                    }
-                }
+                .onSubmit(submit)
                 .accessibilityLabel("Link to download")
             if !model.urlString.isEmpty {
                 Button {
                     model.urlString = ""
                     focused = true
                 } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
                 .help("Clear")
             }
-            // A clear, labeled action — the field alone could be mistaken for search.
-            Button {
-                if model.isValidURL {
-                    model.addCardDismissedFor = nil
-                    if case .loaded = model.preview { model.downloadFromComposer() }
-                } else if model.urlString.isEmpty {
-                    model.pasteFromClipboard()
-                } else {
-                    focused = true
-                }
-            } label: {
-                Label(model.urlString.isEmpty ? "Paste" : "Download",
-                      systemImage: model.urlString.isEmpty ? "doc.on.clipboard" : "arrow.down")
-                    .font(.callout.weight(.semibold))
-                    .labelStyle(.titleAndIcon)
+            Button(action: primaryAction) {
+                Text(model.urlString.isEmpty ? "Paste" : "Download")
+                    .font(.system(size: 14, weight: .semibold))
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 3)
-                    .foregroundStyle(.white)
-                    .background(Capsule().fill(Color.accentColor.gradient))
-                    .opacity(model.urlString.isEmpty || model.isValidURL ? 1 : 0.4)
+                    .frame(height: 30)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.capsule)
+            .disabled(!model.urlString.isEmpty && !model.isValidURL)
             .help(model.urlString.isEmpty ? "Paste a copied link" : "Download this link")
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 4)
-        .frame(width: 520, height: 32)
+        .padding(.leading, 18)
+        .padding(.trailing, 8)
+        .frame(height: 50)
+        .frame(maxWidth: 680)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .overlay(
+            Capsule().strokeBorder(focused ? Color.accentColor.opacity(0.7) : Color.primary.opacity(hovering ? 0.14 : 0.08),
+                                   lineWidth: focused ? 1.5 : 1)
+        )
+        .shadow(color: .black.opacity(focused ? 0.14 : 0.07), radius: focused ? 18 : 10, y: 4)
+        .onHover { hovering = $0 }
+        .animation(.smooth(duration: 0.2), value: focused)
         .popover(isPresented: cardPresented, arrowEdge: .bottom) {
             AddCard(model: model)
         }
-        .onChange(of: model.focusRequest) { focused = true }
+        .task(id: model.focusRequest) {
+            // The field may appear after New Download (⌘N) was chosen elsewhere.
+            if model.focusRequest != model.focusHandled {
+                model.focusHandled = model.focusRequest
+                focused = true
+            }
+        }
         .onChange(of: model.urlString) { if model.urlString.isEmpty { model.addCardDismissedFor = nil } }
+    }
+
+    private func submit() {
+        guard model.isValidURL else { return }
+        model.addCardDismissedFor = nil
+        if case .loaded = model.preview { model.downloadFromComposer() }
+    }
+
+    private func primaryAction() {
+        if model.urlString.isEmpty {
+            model.pasteFromClipboard()
+        } else {
+            submit()
+        }
     }
 }
 
@@ -321,7 +337,7 @@ struct DownloadsToolbarButton: View {
             HStack(spacing: 0) {
             ZStack {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                 Circle()
                     .stroke(Color.primary.opacity(active.isEmpty ? 0.6 : 0.18), lineWidth: 1.6)
                 if let progress, !active.isEmpty {
@@ -344,11 +360,6 @@ struct DownloadsToolbarButton: View {
                         .offset(x: 9, y: -7)
                 }
             }
-            .padding(.leading, 2)
-            Text("Downloads")
-                .font(.callout)
-                .padding(.leading, 6)
-                .padding(.trailing, 4)
             }
         }
         .help("Downloads")

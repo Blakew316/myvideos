@@ -106,7 +106,9 @@ struct Snapshots {
             .background(WindowBackdrop())
         }
         render("library-top", size: CGSize(width: 980, height: 560)) {
-            VStack(alignment: .leading, spacing: 36) {
+            VStack(alignment: .leading, spacing: 30) {
+                HStack { AddLinkField(model: model) }.frame(maxWidth: .infinity)
+                FeaturedCard(item: items[1], model: model, play: {})
                 QuickActions(model: model)
             }
             .padding(28)

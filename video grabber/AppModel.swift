@@ -13,7 +13,7 @@ enum LibraryFilter: String, Hashable, CaseIterable {
 
     var title: String {
         switch self {
-        case .all: return "All Items"
+        case .all: return "Home"
         case .videos: return "Videos"
         case .music: return "Music"
         }
@@ -21,8 +21,8 @@ enum LibraryFilter: String, Hashable, CaseIterable {
 
     var symbol: String {
         switch self {
-        case .all: return "square.grid.2x2"
-        case .videos: return "film"
+        case .all: return "house"
+        case .videos: return "play.rectangle"
         case .music: return "music.note"
         }
     }
@@ -88,6 +88,8 @@ final class AppModel {
     var pendingJobs: [DownloadJob] { jobs.filter { $0.phase != .finished && $0.phase != .cancelled } }
     /// Bumped to ask the composer to focus its link field.
     var focusRequest = 0
+    /// The last focus request the link field acted on (it may appear after the request).
+    var focusHandled = 0
     /// Presents the Subscribe sheet, optionally prefilled with a link.
     var subscribeRequest: SubscribeRequest?
 

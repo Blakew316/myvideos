@@ -97,7 +97,7 @@ private struct AppCommands: Commands {
             Button("Sign In to a Site…") { openWindow(id: "signin") }
         }
         CommandGroup(before: .sidebar) {
-            Button("All Items") { show(.library(.all)) }.keyboardShortcut("1")
+            Button("Home") { show(.library(.all)) }.keyboardShortcut("1")
             Button("Videos") { show(.library(.videos)) }.keyboardShortcut("2")
             Button("Music") { show(.library(.music)) }.keyboardShortcut("3")
             Button("Channels") { show(.subscriptions) }.keyboardShortcut("4")

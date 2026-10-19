@@ -80,6 +80,14 @@ struct LibraryView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // The one thing people come here to do, always in reach.
+                HStack { AddLinkField(model: model) }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 14)
+                    .padding(.bottom, 10)
+            }
             .background(WindowBackdrop())
             .overlay {
                 if isDropTargeted {
@@ -147,13 +155,16 @@ struct LibraryView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 36) {
-                    if search.isEmpty {
+                    if search.isEmpty && filter == .all {
+                        if let latest = items.first {
+                            FeaturedCard(item: latest, model: model) { play(latest) }
+                        }
                         QuickActions(model: model)
                     }
                     if !items.isEmpty {
                         HStack(spacing: 12) {
-                            Text(search.isEmpty ? "Your Library" : "Results")
-                                .font(.title.weight(.bold))
+                            Text(search.isEmpty ? (filter == .all ? "Library" : filter.title) : "Results")
+                                .font(.title2.weight(.bold))
                             Spacer()
                             Picker("Group By", selection: $model.libraryGrouping) {
                                 ForEach(LibraryGrouping.allCases) { Text($0.title).tag($0) }
@@ -162,13 +173,6 @@ struct LibraryView: View {
                             .labelsHidden()
                             .fixedSize()
                             .help("Group by date added or by channel")
-                            Button {
-                                model.showStorage = true
-                            } label: {
-                                Label("Storage", systemImage: "internaldrive")
-                            }
-                            .buttonStyle(.glass)
-                            .help("See how much space your downloads use")
                         }
                         .padding(.bottom, -18)
                     }
@@ -195,7 +199,7 @@ struct LibraryView: View {
                     }
                 }
                 .padding(.horizontal, 28)
-                .padding(.top, 20)
+                .padding(.top, 14)
                 .padding(.bottom, 40)
             }
             .focusable()
@@ -218,7 +222,7 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(.headline)
                 Text("\(count)")
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.tertiary)
@@ -548,146 +552,242 @@ struct ProgressRing: View {
 
 // MARK: - Empty library
 
+
+/// A first-run welcome under the link bar: what My Videos does, in one color.
 private struct EmptyLibrary: View {
     let model: AppModel
 
     var body: some View {
-        VStack(spacing: 34) {
+        VStack(spacing: 40) {
             VStack(spacing: 14) {
-                AppGlyph(size: 84)
-                    .padding(.bottom, 6)
-                Text("Your Library Is Empty")
+                Image(systemName: "play.rectangle.on.rectangle.fill")
+                    .font(.system(size: 54, weight: .regular))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.bottom, 8)
+                Text("Save anything you watch or hear.")
                     .font(.system(size: 30, weight: .bold))
-                    .tracking(-0.3)
-                Text("Paste a link in the field above, press ⌘V, or drag a link here.")
-                    .font(.title3)
+                    .tracking(-0.4)
+                Text("Paste a link above, press ⌘V anywhere, or drop a link on this window.\nVideos, playlists and songs from YouTube, Vimeo, TikTok and more than a thousand other sites.")
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
             }
-            PasteButton(payloadType: String.self) { strings in
-                model.paste(strings.first)
-            }
-            .buttonBorderShape(.capsule)
-            .controlSize(.large)
-
-            HStack(alignment: .top, spacing: 28) {
-                tip("film.stack", .blue, "Videos & Playlists", "From YouTube, Vimeo and thousands more.")
-                tip("music.note", .pink, "Songs to Apple Music", "With artwork, details and lyrics.")
-                tip("dot.radiowaves.left.and.right", .red, "Follow Channels", "New uploads download on their own.")
-            }
-            .frame(maxWidth: 640)
+            QuickActions(model: model)
+                .frame(maxWidth: 900)
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func tip(_ symbol: String, _ color: Color, _ title: String, _ text: String) -> some View {
-        VStack(spacing: 10) {
-            IconTile(systemImage: symbol, color: color, size: 40)
-            Text(title).font(.headline)
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity)
+        .padding(.bottom, 40)
     }
 }
 
-// MARK: - Quick actions
+// MARK: - Featured
 
-/// The four things people come here to do, as bold, colorful tiles across the top.
+/// The latest download, large, on a wash of its own artwork — like Apple TV's Up Next.
+struct FeaturedCard: View {
+    let item: HistoryItem
+    let model: AppModel
+    let play: () -> Void
+    @State private var hovering = false
+
+    private var files: [URL] { item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) } }
+
+    var body: some View {
+        HStack(spacing: 28) {
+            Thumbnail(url: item.thumbnailURL, isAudio: item.isAudio, cornerRadius: 12)
+                .frame(width: 320, height: 180)
+                .overlay {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .offset(x: 2)
+                        .frame(width: 56, height: 56)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .environment(\.colorScheme, .dark)
+                        .opacity(hovering && !files.isEmpty ? 1 : 0)
+                }
+                .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+                .onTapGesture { if !files.isEmpty { play() } }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(item.isAudio ? "LATEST SONG" : "LATEST DOWNLOAD")
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.6))
+                Text(item.title)
+                    .font(.system(size: 24, weight: .bold))
+                    .tracking(-0.3)
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                Text(details)
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+                HStack(spacing: 10) {
+                    Button(action: play) {
+                        Label("Play", systemImage: "play.fill")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 18)
+                            .frame(height: 34)
+                            .background(.white, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(files.isEmpty)
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting(files)
+                    } label: {
+                        Image(systemName: "folder")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(.white.opacity(0.16), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show in Finder")
+                    .disabled(files.isEmpty)
+                    if item.isAudio {
+                        Button {
+                            model.addToMusic(item)
+                        } label: {
+                            Image(systemName: "music.note.list")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(.white.opacity(0.16), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Add to Apple Music")
+                        .disabled(files.isEmpty)
+                    }
+                }
+                .padding(.top, 8)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(26)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            ZStack {
+                Color(white: 0.09)
+                Artwork(url: item.thumbnailURL)
+                    .blur(radius: 90)
+                    .saturation(1.4)
+                    .opacity(0.8)
+                LinearGradient(colors: [.black.opacity(0.25), .black.opacity(0.6)],
+                               startPoint: .leading, endPoint: .trailing)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.08)))
+        .shadow(color: .black.opacity(0.18), radius: 20, y: 10)
+        .onHover { hovering = $0 }
+        .animation(.smooth(duration: 0.2), value: hovering)
+        .contextMenu {
+            Button("Play", action: play).disabled(files.isEmpty)
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }.disabled(files.isEmpty)
+        }
+    }
+
+    private var details: String {
+        var parts: [String] = []
+        if let uploader = item.uploader { parts.append(uploader) }
+        if let duration = item.duration, duration > 0, !item.isPlaylist { parts.append(Timecode.string(duration)) }
+        if item.isPlaylist { parts.append("\(item.filePaths.count) items") }
+        parts.append(item.date.formatted(.relative(presentation: .named)))
+        return parts.joined(separator: "  ·  ")
+    }
+}
+
+/// Artwork that fills its frame (for washes and backdrops).
+private struct Artwork: View {
+    let url: URL?
+
+    var body: some View {
+        GeometryReader { geo in
+            Group {
+                if let url, url.isFileURL, let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else if let url {
+                    AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
+        }
+    }
+}
+
+// MARK: - Shortcuts
+
+/// Quiet shortcuts to the other things My Videos does. One color, no fuss.
 struct QuickActions: View {
     let model: AppModel
     @Environment(\.openSettings) private var openSettings
 
-    private let columns = [GridItem(.adaptive(minimum: 190), spacing: 16)]
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 3)
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 16) {
-            if model.clipboardHasLink {
-                QuickActionTile(title: "Paste Copied Link", subtitle: "Download what you just copied",
-                                symbol: "doc.on.clipboard.fill", colors: [Color(red: 0.36, green: 0.36, blue: 0.95), Color(red: 0.24, green: 0.2, blue: 0.75)]) {
-                    model.pasteFromClipboard()
-                }
-            } else {
-                QuickActionTile(title: "New Download", subtitle: "Paste a link from any site",
-                                symbol: "arrow.down.circle.fill", colors: [Color(red: 0.36, green: 0.36, blue: 0.95), Color(red: 0.24, green: 0.2, blue: 0.75)]) {
-                    model.focusRequest += 1
-                }
-            }
-            QuickActionTile(title: "Follow a Channel", subtitle: "New uploads download themselves",
-                            symbol: "dot.radiowaves.left.and.right", colors: [Color(red: 1.0, green: 0.36, blue: 0.4), Color(red: 0.85, green: 0.15, blue: 0.35)]) {
+        LazyVGrid(columns: columns, spacing: 14) {
+            ShortcutTile(title: "Follow a Channel", subtitle: "New uploads save themselves",
+                         symbol: "person.crop.circle.badge.plus") {
                 model.subscribeRequest = .init(link: "")
             }
-            QuickActionTile(title: "Convert a File", subtitle: "MP3, smaller video or a GIF",
-                            symbol: "wand.and.sparkles", colors: [Color(red: 1.0, green: 0.62, blue: 0.2), Color(red: 0.95, green: 0.4, blue: 0.1)]) {
+            ShortcutTile(title: "Convert a File", subtitle: "MP3, smaller video or GIF",
+                         symbol: "arrow.triangle.2.circlepath") {
                 model.selection = .convert
             }
-            QuickActionTile(title: "Use on iPhone", subtitle: "Send links and watch anywhere",
-                            symbol: "iphone.gen3", colors: [Color(red: 0.2, green: 0.8, blue: 0.55), Color(red: 0.05, green: 0.6, blue: 0.5)]) {
+            ShortcutTile(title: "Use on iPhone", subtitle: "Send links and watch",
+                         symbol: "iphone") {
                 NSApp.activate()
                 openSettings()
             }
         }
-        .animation(.smooth(duration: 0.25), value: model.clipboardHasLink)
     }
 }
 
-private struct QuickActionTile: View {
+private struct ShortcutTile: View {
     let title: String
     let subtitle: String
     let symbol: String
-    let colors: [Color]
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top) {
-                    Image(systemName: symbol)
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white.opacity(hovering ? 0.95 : 0.55))
-                        .offset(x: hovering ? 2 : 0, y: hovering ? -2 : 0)
+            HStack(spacing: 13) {
+                Image(systemName: symbol)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 18)
-                Text(title)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.82))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .padding(.top, 2)
+                .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .offset(x: hovering ? 2 : 0)
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, minHeight: 128, alignment: .leading)
-            .background {
-                ZStack {
-                    LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                    // Soft light from the top-left, like glass catching a window.
-                    RadialGradient(colors: [.white.opacity(0.28), .clear], center: .topLeading, startRadius: 0, endRadius: 180)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.18)))
-            .shadow(color: colors.last?.opacity(hovering ? 0.45 : 0.25) ?? .clear, radius: hovering ? 16 : 10, y: hovering ? 8 : 5)
-            .scaleEffect(hovering ? 1.02 : 1)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.primary.opacity(hovering ? 0.075 : 0.045),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: hovering)
+        .animation(.smooth(duration: 0.18), value: hovering)
         .accessibilityLabel(title)
         .accessibilityHint(subtitle)
     }

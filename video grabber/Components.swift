@@ -205,22 +205,25 @@ struct Thumbnail: View {
     var cornerRadius: CGFloat = 8
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
-            Image(systemName: isAudio ? "music.note" : "play.rectangle")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.tertiary)
-            if let url, url.isFileURL, let image = NSImage(contentsOf: url) {
-                Image(nsImage: image).resizable().scaledToFill()
-            } else if let url {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(Color.primary.opacity(0.06))
+            .overlay {
+                Image(systemName: isAudio ? "music.note" : "play.rectangle")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            // Artwork fills the tile without ever changing its size.
+            .overlay {
+                if let url, url.isFileURL, let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else if let url {
+                    AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        }
                     }
                 }
             }
-        }
         .aspectRatio(16 / 9, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
