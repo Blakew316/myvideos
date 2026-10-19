@@ -21,6 +21,14 @@ struct ContentView: View {
                     ToolbarItem(placement: .primaryAction) {
                         DownloadsToolbarButton(model: model)
                     }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            model.showNewDownload = true
+                        } label: {
+                            Label("New Download", systemImage: "plus")
+                        }
+                        .help("New Download (⌘N)")
+                    }
                 }
         }
         .frame(minWidth: 900, minHeight: 620)
@@ -32,6 +40,7 @@ struct ContentView: View {
             OnboardingView(model: model)
         }
         .sheet(isPresented: $model.showStorage) { StorageView(model: model) }
+        .sheet(isPresented: $model.showNewDownload) { NewDownloadSheet(model: model) }
         .sheet(item: $model.subscribeRequest) { request in
             SubscribeSheet(model: model, link: request.link)
         }
@@ -148,7 +157,8 @@ private struct LibrarySummary: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Storage")
-                        .font(.caption.weight(.semibold))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text(bytes > 0 ? ByteSize.string(Double(bytes)) : "Empty")
                         .font(.caption.monospacedDigit())
@@ -163,13 +173,14 @@ private struct LibrarySummary: View {
                                 .frame(width: bytes > 0 ? max(4, geo.size.width * fraction) : 0)
                         }
                 }
-                .frame(height: 4)
+                .frame(height: 3)
                 Text("\(items.count) item\(items.count == 1 ? "" : "s")" + (available.map { " · \(ByteSize.string(Double($0))) free" } ?? ""))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
-            .padding(12)
-            .background(Color.primary.opacity(hovering ? 0.07 : 0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.primary.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
             .contentShape(Rectangle())

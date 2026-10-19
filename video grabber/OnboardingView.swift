@@ -32,7 +32,6 @@ struct OnboardingView: View {
             footer
         }
         .frame(width: 580, height: 660)
-        .background(WindowBackdrop())
         .animation(.smooth(duration: 0.35), value: step)
         .onAppear {
             if model.prefs.hasCompletedOnboarding { step = .setup }

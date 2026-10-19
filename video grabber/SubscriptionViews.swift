@@ -45,12 +45,13 @@ struct SubscriptionsOverview: View {
         Group {
             if model.subscriptions.items.isEmpty {
                 ContentUnavailableView {
-                    Label("No Subscriptions", systemImage: "dot.radiowaves.left.and.right")
+                    Label("No Channels", systemImage: "person.2")
                 } description: {
                     Text("Follow a channel or playlist and My Videos downloads new uploads automatically.")
                 } actions: {
-                    Button("Add Subscription…") { model.subscribeRequest = .init(link: "") }
-                        .buttonStyle(.glassProminent)
+                    Button("Follow a Channel…") { model.subscribeRequest = .init(link: "") }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                 }
             } else {
                 ScrollView {
@@ -68,8 +69,7 @@ struct SubscriptionsOverview: View {
                 }
             }
         }
-        .background(WindowBackdrop())
-        .navigationTitle("Subscriptions")
+        .navigationTitle("Channels")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -82,9 +82,9 @@ struct SubscriptionsOverview: View {
                 Button {
                     model.subscribeRequest = .init(link: "")
                 } label: {
-                    Label("Add Subscription", systemImage: "plus")
+                    Label("Follow a Channel", systemImage: "person.crop.circle.badge.plus")
                 }
-                .help("Add Subscription")
+                .help("Follow a Channel")
             }
         }
     }
@@ -169,7 +169,6 @@ struct SubscriptionDetailView: View {
                 .frame(maxWidth: 1000, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
-            .background(WindowBackdrop())
             .navigationTitle(sub.title)
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -441,7 +440,6 @@ struct SubscribeSheet: View {
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .animation(.smooth(duration: 0.3), value: state)
-        .background(WindowBackdrop())
         .onAppear {
             format = model.prefs.quality
             addToMusic = model.prefs.addToMusic

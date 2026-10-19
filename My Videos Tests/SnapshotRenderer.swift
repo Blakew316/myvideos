@@ -103,29 +103,12 @@ struct Snapshots {
                 }
                 .padding(28)
             }
-            .background(WindowBackdrop())
         }
-        render("library-top", size: CGSize(width: 980, height: 560)) {
-            VStack(alignment: .leading, spacing: 30) {
-                HStack { AddLinkField(model: model) }.frame(maxWidth: .infinity)
-                FeaturedCard(item: items[1], model: model, play: {})
-                QuickActions(model: model)
-            }
-            .padding(28)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(WindowBackdrop())
-        }
-        render("toolbar-controls", size: CGSize(width: 760, height: 70)) {
-            HStack(spacing: 20) {
-                AddLinkField(model: model)
-                DownloadsToolbarButton(model: model).buttonStyle(.bordered)
-            }
-            .padding(16)
-        }
+        render("new-download", size: CGSize(width: 480, height: 140)) { NewDownloadSheet(model: model) }
         await model.toolchain.refresh()
         model.urlString = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
         for _ in 0..<40 where model.previewInfo == nil { try? await Task.sleep(for: .milliseconds(500)) }
-        render("add-card", size: CGSize(width: 480, height: 330)) { AddCard(model: model) }
+        render("add-card", size: CGSize(width: 480, height: 420)) { AddCard(model: model) }
         render("downloads-popover", size: CGSize(width: 440, height: 200)) { DownloadsPopover(model: model) }
         model.urlString = ""
     }

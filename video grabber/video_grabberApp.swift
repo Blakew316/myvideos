@@ -77,17 +77,20 @@ private struct AppCommands: Commands {
             }
         }
         CommandGroup(replacing: .newItem) {
-            Button("New Download") {
+            Button("New Download…") {
                 show(.home)
-                model.focusRequest += 1
+                model.showNewDownload = true
             }
             .keyboardShortcut("n")
             Button("Paste and Download") {
                 show(.home)
-                if model.pasteFromClipboard() { model.downloadFromComposer() }
+                if model.pasteFromClipboard() {
+                    model.downloadFromComposer()
+                    model.showNewDownload = false
+                }
             }
             .keyboardShortcut("v", modifiers: [.command, .shift])
-            Button("Add Subscription…") {
+            Button("Follow a Channel…") {
                 show(.subscriptions)
                 model.subscribeRequest = .init(link: "")
             }
@@ -97,11 +100,17 @@ private struct AppCommands: Commands {
             Button("Sign In to a Site…") { openWindow(id: "signin") }
         }
         CommandGroup(before: .sidebar) {
-            Button("Home") { show(.library(.all)) }.keyboardShortcut("1")
+            Button("All") { show(.library(.all)) }.keyboardShortcut("1")
             Button("Videos") { show(.library(.videos)) }.keyboardShortcut("2")
             Button("Music") { show(.library(.music)) }.keyboardShortcut("3")
             Button("Channels") { show(.subscriptions) }.keyboardShortcut("4")
             Button("Convert") { show(.convert) }.keyboardShortcut("5")
+            Divider()
+            Picker("View", selection: Bindable(model).libraryLayout) {
+                Text("as Icons").tag(LibraryLayout.grid)
+                Text("as List").tag(LibraryLayout.list)
+            }
+            .pickerStyle(.inline)
             Divider()
             Button(model.showDownloads ? "Hide Downloads" : "Show Downloads") {
                 show(model.selection ?? .home)

@@ -58,7 +58,6 @@ struct ConvertView: View {
             .frame(maxWidth: 760)
             .frame(maxWidth: .infinity)
         }
-        .background(WindowBackdrop())
         .navigationTitle("Convert")
         .animation(.smooth(duration: 0.3), value: model.conversions.map(\.id))
         .animation(.smooth(duration: 0.3), value: model.stagedFiles)

@@ -9,99 +9,67 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Link bar
+// MARK: - New Download sheet
 
-struct AddLinkField: View {
+/// ⌘N, ⌘V or a dropped link: one sheet with the link on top and the details below.
+struct NewDownloadSheet: View {
     @Bindable var model: AppModel
     @FocusState private var focused: Bool
-    @State private var hovering = false
-
-    /// The card appears once the link has been looked up — never mid-typing.
-    private var cardPresented: Binding<Bool> {
-        Binding {
-            guard model.isValidURL, model.addCardDismissedFor != model.trimmedURL else { return false }
-            switch model.preview {
-            case .loaded, .failed: return true
-            default: return false
-            }
-        } set: { shown in
-            if !shown { model.addCardDismissedFor = model.trimmedURL }
-        }
-    }
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        HStack(spacing: 12) {
-            Group {
-                if model.preview == .loading {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "link")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(focused ? Color.accentColor : .secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                TextField("Link", text: $model.urlString,
+                          prompt: Text("Paste a link to a video, playlist or song"))
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.large)
+                    .autocorrectionDisabled()
+                    .focused($focused)
+                    .onSubmit(submit)
+                    .labelsHidden()
+                    .accessibilityLabel("Link to download")
+                PasteButton(payloadType: String.self) { strings in
+                    Task { @MainActor in model.paste(strings.first) }
                 }
+                .labelStyle(.iconOnly)
+                .controlSize(.large)
+                .help("Paste")
             }
-            .frame(width: 22)
-            TextField("Paste a link to a video, playlist or song", text: $model.urlString)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .autocorrectionDisabled()
-                .focused($focused)
-                .onSubmit(submit)
-                .accessibilityLabel("Link to download")
-            if !model.urlString.isEmpty {
-                Button {
-                    model.urlString = ""
-                    focused = true
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.tertiary)
+            .padding(20)
+
+            if model.isValidURL {
+                Divider()
+                AddCard(model: model, close: close)
+            } else {
+                Divider()
+                HStack {
+                    Text(model.urlString.isEmpty ? "Videos, playlists and songs from YouTube, Vimeo, TikTok and over a thousand other sites."
+                                                 : "That doesn’t look like a web link yet.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 16)
+                    Button("Cancel", action: close)
+                        .keyboardShortcut(.cancelAction)
                 }
-                .buttonStyle(.plain)
-                .help("Clear")
-            }
-            Button(model.urlString.isEmpty ? "Paste" : "Download", action: primaryAction)
-                .buttonStyle(PrimaryCapsuleButtonStyle(height: 34))
-            .disabled(!model.urlString.isEmpty && !model.isValidURL)
-            .help(model.urlString.isEmpty ? "Paste a copied link" : "Download this link")
-        }
-        .padding(.leading, 18)
-        .padding(.trailing, 8)
-        .frame(height: 50)
-        .frame(maxWidth: 680)
-        .glassEffect(.regular.interactive(), in: Capsule())
-        .overlay(
-            Capsule().strokeBorder(focused ? Color.accentColor.opacity(0.65) : Color.primary.opacity(hovering ? 0.14 : 0.08),
-                                   lineWidth: focused ? 1.5 : 1)
-        )
-        .shadow(color: .black.opacity(focused ? 0.14 : 0.07), radius: focused ? 18 : 10, y: 4)
-        .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.2), value: focused)
-        .popover(isPresented: cardPresented, arrowEdge: .bottom) {
-            AddCard(model: model)
-        }
-        .task(id: model.focusRequest) {
-            // The field may appear after New Download (⌘N) was chosen elsewhere.
-            if model.focusRequest != model.focusHandled {
-                model.focusHandled = model.focusRequest
-                focused = true
+                .padding(20)
             }
         }
-        .onChange(of: model.urlString) { if model.urlString.isEmpty { model.addCardDismissedFor = nil } }
+        .frame(width: 480)
+        .onAppear { focused = true }
+        .animation(.smooth(duration: 0.25), value: model.isValidURL)
     }
 
     private func submit() {
-        guard model.isValidURL else { return }
-        model.addCardDismissedFor = nil
-        if case .loaded = model.preview { model.downloadFromComposer() }
+        guard model.isValidURL, case .loaded = model.preview else { return }
+        model.downloadFromComposer()
+        dismiss()
     }
 
-    private func primaryAction() {
-        if model.urlString.isEmpty {
-            model.pasteFromClipboard()
-        } else {
-            submit()
-        }
+    private func close() {
+        model.urlString = ""
+        dismiss()
     }
 }
 
@@ -110,12 +78,14 @@ struct AddLinkField: View {
 /// Confirms a download: what it is, Video or Audio, optional details, Download.
 struct AddCard: View {
     @Bindable var model: AppModel
+    var close: () -> Void = {}
     @Bindable private var settings: Preferences
     @State private var showOptions = false
     @AppStorage("lastVideoQuality") private var lastVideoQuality = DownloadQuality.best.rawValue
 
-    init(model: AppModel) {
+    init(model: AppModel, close: @escaping () -> Void = {}) {
         self.model = model
+        self.close = close
         self.settings = model.prefs
     }
 
@@ -181,21 +151,19 @@ struct AddCard: View {
             HStack(spacing: 10) {
                 signInNote
                 Spacer()
-                Button("Cancel") { model.addCardDismissedFor = model.trimmedURL }
+                Button("Cancel", action: close)
                     .keyboardShortcut(.cancelAction)
-                    .controlSize(.large)
-                Button {
+                Button(model.activeJob == nil ? "Download" : "Add to Downloads") {
                     model.downloadFromComposer()
-                } label: {
-                    Text(model.activeJob == nil ? "Download" : "Add to Downloads")
+                    close()
                 }
-                .buttonStyle(PrimaryCapsuleButtonStyle(height: 32))
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!model.isValidURL || !model.toolchain.isReady)
             }
         }
         .padding(20)
-        .frame(width: 440)
+        .frame(width: 480)
         .animation(.smooth(duration: 0.25), value: prefs.quality)
     }
 
@@ -205,7 +173,7 @@ struct AddCard: View {
         case .loaded(let info):
             VStack(alignment: .leading, spacing: 12) {
                 Thumbnail(url: info.thumbnailURL, isAudio: prefs.quality == .audio, cornerRadius: 14)
-                    .frame(width: 400, height: 225)
+                    .frame(width: 440, height: 248)
                     .overlay(alignment: .bottomTrailing) {
                         if let duration = info.duration, !info.isPlaylist {
                             Text(Timecode.string(duration))
@@ -226,7 +194,6 @@ struct AddCard: View {
                                 .padding(10)
                         }
                     }
-                    .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(info.title)
                         .font(.title3.weight(.semibold))
@@ -245,12 +212,15 @@ struct AddCard: View {
                         }
                         if let link = model.subscribableLink, !model.subscriptions.contains(url: link) {
                             Button {
-                                model.addCardDismissedFor = model.trimmedURL
-                                model.subscribeRequest = .init(link: link)
+                                close()
+                                // Wait for this sheet to go before presenting the next one.
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(350))
+                                    model.subscribeRequest = .init(link: link)
+                                }
                             } label: {
                                 Label("Follow", systemImage: "plus")
                             }
-                            .buttonStyle(.glass)
                             .controlSize(.small)
                             .help("Download new uploads from \(info.uploader ?? "this channel") automatically")
                         }
@@ -389,7 +359,7 @@ struct DownloadsPopover: View {
                         .font(.system(size: 30, weight: .light))
                         .foregroundStyle(.tertiary)
                     Text("No Downloads").font(.headline)
-                    Text("Paste a link in the toolbar to start one.")
+                    Text("Choose File › New Download or press ⌘N.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

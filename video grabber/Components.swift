@@ -22,29 +22,6 @@ enum Brand {
     static func muted(_ color: Color) -> Color { color.mix(with: Color(white: 0.45), by: 0.38) }
 }
 
-/// The main action on a screen: a solid sapphire capsule with a soft sheen.
-struct PrimaryCapsuleButtonStyle: ButtonStyle {
-    var height: CGFloat = 32
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .frame(height: height)
-            .background(
-                Capsule().fill(Color.accentColor.gradient)
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
-                    .brightness(configuration.isPressed ? -0.08 : 0)
-                    .opacity(isEnabled ? 1 : 0.4)
-            )
-            .shadow(color: Color.accentColor.opacity(isEnabled ? 0.3 : 0), radius: 6, y: 2)
-            .contentShape(Capsule())
-            .animation(.smooth(duration: 0.15), value: configuration.isPressed)
-    }
-}
-
 /// The app's mark, drawn in SwiftUI so it matches the app icon at any size.
 struct AppGlyph: View {
     var size: CGFloat
@@ -87,19 +64,6 @@ struct AppGlyph: View {
         .frame(width: size, height: size)
         .shadow(color: .black.opacity(0.25), radius: size * 0.12, y: size * 0.06)
         .accessibilityHidden(true)
-    }
-}
-
-/// A faint sapphire glow at the top of the window.
-struct WindowBackdrop: View {
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        // A faint sapphire light from above, so the page has depth and a hint of color.
-        RadialGradient(colors: [Brand.slate.opacity(scheme == .dark ? 0.16 : 0.08), .clear],
-                       center: .top, startRadius: 0, endRadius: 620)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
     }
 }
 

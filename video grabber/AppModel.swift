@@ -13,7 +13,7 @@ enum LibraryFilter: String, Hashable, CaseIterable {
 
     var title: String {
         switch self {
-        case .all: return "Home"
+        case .all: return "All"
         case .videos: return "Videos"
         case .music: return "Music"
         }
@@ -21,7 +21,7 @@ enum LibraryFilter: String, Hashable, CaseIterable {
 
     var symbol: String {
         switch self {
-        case .all: return "house"
+        case .all: return "square.grid.2x2"
         case .videos: return "play.rectangle"
         case .music: return "music.note"
         }
@@ -49,6 +49,13 @@ enum LibraryGrouping: String, CaseIterable, Identifiable {
     case date, channel
     var id: String { rawValue }
     var title: String { self == .date ? "Date Added" : "Channel" }
+}
+
+enum LibraryLayout: String, CaseIterable, Identifiable {
+    case grid, list
+    var id: String { rawValue }
+    var title: String { self == .grid ? "Icons" : "List" }
+    var symbol: String { self == .grid ? "square.grid.2x2" : "list.bullet" }
 }
 
 /// The single source of truth shared by the main window, the menu bar extra, App Intents,
@@ -80,6 +87,11 @@ final class AppModel {
     var showStorage = false
     /// The add card was dismissed for this link (so it doesn't pop back up while typing).
     var addCardDismissedFor: String?
+    /// The New Download sheet (⌘N, paste, or a dropped link).
+    var showNewDownload = false
+    var libraryLayout: LibraryLayout = LibraryLayout(rawValue: UserDefaults.standard.string(forKey: "libraryLayout") ?? "") ?? .grid {
+        didSet { UserDefaults.standard.set(libraryLayout.rawValue, forKey: "libraryLayout") }
+    }
     var libraryGrouping: LibraryGrouping = LibraryGrouping(rawValue: UserDefaults.standard.string(forKey: "libraryGrouping") ?? "") ?? .date {
         didSet { UserDefaults.standard.set(libraryGrouping.rawValue, forKey: "libraryGrouping") }
     }
@@ -934,6 +946,7 @@ final class AppModel {
         if case .library = selection {} else { selection = .home }
         addCardDismissedFor = nil
         urlString = trimmed
+        showNewDownload = true
     }
 
     /// Reads the clipboard into the composer (used by the Paste and Download command).

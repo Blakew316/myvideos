@@ -60,7 +60,6 @@ struct StorageView: View {
             .padding(20)
         }
         .frame(width: 600, height: 640)
-        .background(WindowBackdrop())
         .task { await measure() }
         .confirmationDialog("Move \(selected.count) download\(selected.count == 1 ? "" : "s") to the Trash?",
                             isPresented: $confirmTrash) {

@@ -20,10 +20,11 @@ struct LibraryView: View {
     @State private var quickLookURL: URL?
     @State private var pendingRemoval: Set<HistoryItem.ID> = []
     @State private var isDropTargeted = false
+    @State private var sortOrder = [KeyPathComparator(\HistoryItem.date, order: .reverse)]
     @FocusState private var gridFocused: Bool
     @Environment(\.openWindow) private var openWindow
 
-    private let columns = [GridItem(.adaptive(minimum: 208, maximum: 290), spacing: 22, alignment: .top)]
+    private let columns = [GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 20, alignment: .top)]
 
     // MARK: Data
 
@@ -80,15 +81,29 @@ struct LibraryView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                // The one thing people come here to do, always in reach.
-                HStack { AddLinkField(model: model) }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 28)
-                    .padding(.top, 14)
-                    .padding(.bottom, 10)
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Picker("View", selection: $model.libraryLayout) {
+                        ForEach(LibraryLayout.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelStyle(.iconOnly)
+                    .help("Show items as icons or in a list")
+                }
+                ToolbarItem(placement: .automatic) {
+                    Menu {
+                        Picker("Group By", selection: $model.libraryGrouping) {
+                            ForEach(LibraryGrouping.allCases) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Label("Group By", systemImage: "rectangle.3.group")
+                    }
+                    .menuIndicator(.hidden)
+                    .disabled(model.libraryLayout == .list)
+                    .help("Group by date added or by channel")
+                }
             }
-            .background(WindowBackdrop())
             .overlay {
                 if isDropTargeted {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -103,7 +118,7 @@ struct LibraryView: View {
             .searchable(text: $search, placement: .sidebar, prompt: "Search Library")
             // ⌘V anywhere in the library starts a download from the copied link.
             .onPasteCommand(of: [.url, .plainText]) { _ in
-                model.pasteFromClipboard()
+                if !model.pasteFromClipboard() { model.showNewDownload = true }
             }
             .dropDestination(for: URL.self) { urls, _ in
                 if let web = urls.first(where: { !$0.isFileURL }) {
@@ -143,7 +158,15 @@ struct LibraryView: View {
             if !search.isEmpty {
                 ContentUnavailableView.search(text: search)
             } else if model.history.items.isEmpty && model.pendingJobs.isEmpty {
-                EmptyLibrary(model: model)
+                ContentUnavailableView {
+                    Label("No Downloads Yet", systemImage: "play.rectangle.on.rectangle")
+                } description: {
+                    Text("Paste a link, press ⌘V, or drop a link on this window to save a video, playlist or song.")
+                } actions: {
+                    Button("New Download…") { model.showNewDownload = true }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                }
             } else {
                 ContentUnavailableView {
                     Label(filter == .music ? "No Music Yet" : "No Videos Yet", systemImage: filter.symbol)
@@ -152,83 +175,137 @@ struct LibraryView: View {
                                           : "Videos you download appear here.")
                 }
             }
+        } else if model.libraryLayout == .list {
+            listContent
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 36) {
-                    if search.isEmpty && filter == .all {
-                        if let latest = items.first {
-                            FeaturedCard(item: latest, model: model) { play(latest) }
-                        }
-                        QuickActions(model: model)
-                    }
-                    if !items.isEmpty {
-                        HStack(spacing: 12) {
-                            Text(search.isEmpty ? (filter == .all ? "Library" : filter.title) : "Results")
-                                .font(.title2.weight(.bold))
-                            Spacer()
-                            Picker("Group By", selection: $model.libraryGrouping) {
-                                ForEach(LibraryGrouping.allCases) { Text($0.title).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .fixedSize()
-                            .help("Group by date added or by channel")
-                        }
-                        .padding(.bottom, -18)
-                    }
-                    if !pending.isEmpty {
-                        section("Downloading", count: pending.count) {
-                            ForEach(pending) { job in
-                                PendingCard(job: job, model: model)
-                                    .transition(.scale(scale: 0.9).combined(with: .opacity))
-                            }
-                        }
-                    }
-                    ForEach(groups) { group in
-                        section(group.title, count: group.items.count) {
-                            ForEach(group.items) { item in
-                                LibraryCard(item: item, isSelected: selection.contains(item.id)) {
-                                    play(item)
-                                } select: { additive in
-                                    select(item, additive: additive)
-                                }
-                                .contextMenu { menu(for: item) }
-                                .transition(.scale(scale: 0.9).combined(with: .opacity))
-                            }
+            gridContent
+        }
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 32) {
+                if !pending.isEmpty {
+                    section("Downloading", count: pending.count) {
+                        ForEach(pending) { job in
+                            PendingCard(job: job, model: model)
+                                .transition(.opacity)
                         }
                     }
                 }
-                .padding(.horizontal, 28)
-                .padding(.top, 14)
-                .padding(.bottom, 40)
+                ForEach(groups) { group in
+                    section(group.title, count: group.items.count) {
+                        ForEach(group.items) { item in
+                            LibraryCard(item: item, isSelected: selection.contains(item.id)) {
+                                play(item)
+                            } select: { additive in
+                                select(item, additive: additive)
+                            }
+                            .contextMenu { menu(for: selection.contains(item.id) ? selection : [item.id], primary: item) }
+                            .transition(.opacity)
+                        }
+                    }
+                }
             }
-            .focusable()
-            .focusEffectDisabled()
-            .focused($gridFocused)
+            .padding(.horizontal, 24)
+            .padding(.top, 16)
+            .padding(.bottom, 32)
+        }
+        .focusable()
+        .focusEffectDisabled()
+        .focused($gridFocused)
+        .onKeyPress(.space) {
+            quickLookURL = quickLookURL == nil ? files(of: selection).first : nil
+            return .handled
+        }
+        .onKeyPress(.return) {
+            if let id = selection.first, let item = model.history.item(id: id) { play(item) }
+            return .handled
+        }
+        .onDeleteCommand { if !selection.isEmpty { pendingRemoval = selection } }
+        .onExitCommand { selection = [] }
+    }
+
+    /// Finder-style list: sortable columns, multiple selection, double-click to play.
+    private var listContent: some View {
+        VStack(spacing: 0) {
+            if !pending.isEmpty {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(pending) { job in
+                            JobRow(job: job, model: model).padding(.horizontal, 16)
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxHeight: min(CGFloat(pending.count) * 84, 220))
+                Divider()
+            }
+            Table(items.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+                TableColumn("Title", value: \.title) { item in
+                    HStack(spacing: 10) {
+                        Thumbnail(url: item.thumbnailURL, isAudio: item.isAudio, cornerRadius: 3)
+                            .frame(width: 48, height: 27)
+                        Text(item.title).lineLimit(1)
+                    }
+                    .opacity(item.isAvailable ? 1 : 0.5)
+                }
+                .width(min: 220, ideal: 380)
+                TableColumn("Channel", value: \.channelSortKey) { item in
+                    Text(item.uploader ?? "").foregroundStyle(.secondary)
+                }
+                .width(min: 90, ideal: 160)
+                TableColumn("Kind", value: \.kindSortKey) { item in
+                    Text(item.kindSortKey).foregroundStyle(.secondary)
+                }
+                .width(min: 50, ideal: 70)
+                TableColumn("Duration", value: \.durationSortKey) { item in
+                    Text(item.duration.map { Timecode.string($0) } ?? "–")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 60, ideal: 70)
+                .alignment(.trailing)
+                TableColumn("Size", value: \.sizeSortKey) { item in
+                    Text(item.byteCount.map { ByteSize.string(Double($0)) } ?? "–")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 60, ideal: 80)
+                .alignment(.trailing)
+                TableColumn("Date Added", value: \.date) { item in
+                    Text(item.date.formatted(date: .abbreviated, time: .shortened))
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 110, ideal: 150)
+            }
+            .tableStyle(.inset(alternatesRowBackgrounds: true))
+            .contextMenu(forSelectionType: HistoryItem.ID.self) { ids in
+                if let first = ids.first, let item = model.history.item(id: first) {
+                    menu(for: ids, primary: item)
+                }
+            } primaryAction: { ids in
+                if let first = ids.first, let item = model.history.item(id: first) { play(item) }
+            }
             .onKeyPress(.space) {
                 quickLookURL = quickLookURL == nil ? files(of: selection).first : nil
                 return .handled
             }
-            .onKeyPress(.return) {
-                if let id = selection.first, let item = model.history.item(id: id) { play(item) }
-                return .handled
-            }
             .onDeleteCommand { if !selection.isEmpty { pendingRemoval = selection } }
-            .onExitCommand { selection = [] }
         }
     }
 
     private func section<Content: View>(_ title: String, count: Int, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title)
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                 Text("\(count)")
-                    .font(.callout.weight(.medium))
+                    .font(.callout)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 26) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
                 content()
             }
         }
@@ -279,8 +356,7 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func menu(for item: HistoryItem) -> some View {
-        let ids = selection.contains(item.id) ? selection : [item.id]
+    private func menu(for ids: Set<HistoryItem.ID>, primary item: HistoryItem) -> some View {
         let files = files(of: ids)
         Button("Play") { play(item) }
             .disabled(files.isEmpty)
@@ -346,10 +422,10 @@ struct LibraryCard: View {
                     if hovering && available {
                         Button(action: play) {
                             Image(systemName: "play.fill")
-                                .font(.system(size: 20, weight: .bold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .offset(x: 1.5)
-                                .frame(width: 50, height: 50)
+                                .offset(x: 1)
+                                .frame(width: 40, height: 40)
                                 .background(.ultraThinMaterial.opacity(0.9), in: Circle())
                                 .environment(\.colorScheme, .dark)
                         }
@@ -370,16 +446,16 @@ struct LibraryCard: View {
                     }
                 }
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
                         .strokeBorder(Color.accentColor, lineWidth: isSelected ? 3 : 0)
+                        .padding(-4)
                 }
-                .shadow(color: .black.opacity(hovering ? 0.22 : 0.10), radius: hovering ? 16 : 6, y: hovering ? 8 : 3)
-                .scaleEffect(hovering ? 1.015 : 1)
+                .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
                 .opacity(available ? 1 : 0.5)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
-                    .font(.callout.weight(.semibold))
+                    .font(.callout.weight(.medium))
                     .lineLimit(2)
                     .foregroundStyle(.primary)
                 Text(caption)
@@ -446,7 +522,7 @@ struct PendingCard: View {
                 .overlay {
                     ProgressRing(job: job) { primaryAction() }
                 }
-                .shadow(color: .black.opacity(0.10), radius: 6, y: 3)
+                .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(job.displayTitle)
@@ -550,247 +626,12 @@ struct ProgressRing: View {
     }
 }
 
-// MARK: - Empty library
+// MARK: - Sorting
 
-
-/// A first-run welcome under the link bar: what My Videos does, in one color.
-private struct EmptyLibrary: View {
-    let model: AppModel
-
-    var body: some View {
-        VStack(spacing: 40) {
-            VStack(spacing: 14) {
-                Image(systemName: "play.rectangle.on.rectangle.fill")
-                    .font(.system(size: 54, weight: .regular))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.bottom, 8)
-                Text("Save anything you watch or hear.")
-                    .font(.system(size: 30, weight: .bold))
-                    .tracking(-0.4)
-                Text("Paste a link above, press ⌘V anywhere, or drop a link on this window.\nVideos, playlists and songs from YouTube, Vimeo, TikTok and more than a thousand other sites.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-            }
-            QuickActions(model: model)
-                .frame(maxWidth: 900)
-        }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.bottom, 40)
-    }
-}
-
-// MARK: - Featured
-
-/// The latest download, large, on a wash of its own artwork — like Apple TV's Up Next.
-struct FeaturedCard: View {
-    let item: HistoryItem
-    let model: AppModel
-    let play: () -> Void
-    @State private var hovering = false
-
-    private var files: [URL] { item.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) } }
-
-    var body: some View {
-        HStack(spacing: 28) {
-            Thumbnail(url: item.thumbnailURL, isAudio: item.isAudio, cornerRadius: 12)
-                .frame(width: 320, height: 180)
-                .overlay {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
-                        .offset(x: 2)
-                        .frame(width: 56, height: 56)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .environment(\.colorScheme, .dark)
-                        .opacity(hovering && !files.isEmpty ? 1 : 0)
-                }
-                .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-                .onTapGesture { if !files.isEmpty { play() } }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(item.isAudio ? "LATEST SONG" : "LATEST DOWNLOAD")
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.6))
-                Text(item.title)
-                    .font(.system(size: 24, weight: .bold))
-                    .tracking(-0.3)
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                Text(details)
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
-                HStack(spacing: 10) {
-                    Button(action: play) {
-                        Label("Play", systemImage: "play.fill")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 18)
-                            .frame(height: 34)
-                            .background(.white, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(files.isEmpty)
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting(files)
-                    } label: {
-                        Image(systemName: "folder")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(.white.opacity(0.16), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show in Finder")
-                    .disabled(files.isEmpty)
-                    if item.isAudio {
-                        Button {
-                            model.addToMusic(item)
-                        } label: {
-                            Image(systemName: "music.note.list")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(.white.opacity(0.16), in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Add to Apple Music")
-                        .disabled(files.isEmpty)
-                    }
-                }
-                .padding(.top, 8)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(26)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            ZStack {
-                Color(white: 0.09)
-                Artwork(url: item.thumbnailURL)
-                    .blur(radius: 90)
-                    .saturation(1.4)
-                    .opacity(0.8)
-                LinearGradient(colors: [.black.opacity(0.25), .black.opacity(0.6)],
-                               startPoint: .leading, endPoint: .trailing)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.08)))
-        .shadow(color: .black.opacity(0.18), radius: 20, y: 10)
-        .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.2), value: hovering)
-        .contextMenu {
-            Button("Play", action: play).disabled(files.isEmpty)
-            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(files) }.disabled(files.isEmpty)
-        }
-    }
-
-    private var details: String {
-        var parts: [String] = []
-        if let uploader = item.uploader { parts.append(uploader) }
-        if let duration = item.duration, duration > 0, !item.isPlaylist { parts.append(Timecode.string(duration)) }
-        if item.isPlaylist { parts.append("\(item.filePaths.count) items") }
-        parts.append(item.date.formatted(.relative(presentation: .named)))
-        return parts.joined(separator: "  ·  ")
-    }
-}
-
-/// Artwork that fills its frame (for washes and backdrops).
-private struct Artwork: View {
-    let url: URL?
-
-    var body: some View {
-        GeometryReader { geo in
-            Group {
-                if let url, url.isFileURL, let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                } else if let url {
-                    AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
-        }
-    }
-}
-
-// MARK: - Shortcuts
-
-/// Quiet shortcuts to the other things My Videos does. One color, no fuss.
-struct QuickActions: View {
-    let model: AppModel
-    @Environment(\.openSettings) private var openSettings
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 3)
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 14) {
-            ShortcutTile(title: "Follow a Channel", subtitle: "New uploads save themselves",
-                         symbol: "person.crop.circle.badge.plus", tint: Brand.rose) {
-                model.subscribeRequest = .init(link: "")
-            }
-            ShortcutTile(title: "Convert a File", subtitle: "MP3, smaller video or GIF",
-                         symbol: "arrow.triangle.2.circlepath", tint: Brand.amber) {
-                model.selection = .convert
-            }
-            ShortcutTile(title: "Use on iPhone", subtitle: "Send links and watch",
-                         symbol: "iphone", tint: Brand.sage) {
-                NSApp.activate()
-                openSettings()
-            }
-        }
-    }
-}
-
-private struct ShortcutTile: View {
-    let title: String
-    let subtitle: String
-    let symbol: String
-    let tint: Color
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 13) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(LinearGradient(colors: [tint, tint.mix(with: .black, by: 0.2)], startPoint: .top, endPoint: .bottom),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .lineLimit(1)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .offset(x: hovering ? 2 : 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color.primary.opacity(hovering ? 0.075 : 0.045),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.18), value: hovering)
-        .accessibilityLabel(title)
-        .accessibilityHint(subtitle)
-    }
+extension HistoryItem {
+    var isAvailable: Bool { fileURLs.contains { FileManager.default.fileExists(atPath: $0.path) } }
+    var channelSortKey: String { uploader ?? "" }
+    var kindSortKey: String { isPlaylist ? "Playlist" : isAudio ? "Audio" : "Video" }
+    var durationSortKey: Double { duration ?? 0 }
+    var sizeSortKey: Int64 { byteCount ?? 0 }
 }
