@@ -106,7 +106,7 @@ struct MenuBarView: View {
             }
 
             HStack {
-                Button("Open My Videos") { showMainWindow(.download) }
+                Button("Open My Videos") { showMainWindow(.home) }
                 Spacer()
                 Button {
                     NSApp.activate()

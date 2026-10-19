@@ -211,7 +211,9 @@ struct Thumbnail: View {
             Image(systemName: isAudio ? "music.note" : "play.rectangle")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.tertiary)
-            if let url {
+            if let url, url.isFileURL, let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else if let url {
                 AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()

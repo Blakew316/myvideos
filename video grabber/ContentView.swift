@@ -7,10 +7,10 @@ import SwiftUI
 import AppKit
 import Combine
 
-/// The main window: sidebar navigation, the selected page, and the activity inspector.
+/// The main window: Library and Channels in the sidebar, the link field and Downloads
+/// button in the toolbar, and an optional Activity inspector for technical details.
 struct ContentView: View {
     @Bindable private var model = AppModel.shared
-    @State private var showActivity = false
 
     var body: some View {
         NavigationSplitView {
@@ -18,18 +18,16 @@ struct ContentView: View {
         } detail: {
             detail
         }
-        .frame(minWidth: 820, minHeight: 620)
+        .frame(minWidth: 900, minHeight: 620)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                AddLinkField(model: model)
+            }
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showActivity.toggle()
-                } label: {
-                    Label("Activity", systemImage: "sidebar.trailing")
-                }
-                .help(showActivity ? "Hide Activity" : "Show Activity")
+                DownloadsToolbarButton(model: model)
             }
         }
-        .inspector(isPresented: $showActivity) {
+        .inspector(isPresented: $model.showActivity) {
             ActivityInspector(log: model.activityLog)
                 .inspectorColumnWidth(min: 280, ideal: 360, max: 600)
         }
@@ -57,50 +55,62 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch model.selection ?? .download {
-        case .download:            ComposerView(model: model)
-        case .queue:               QueueView(model: model)
-        case .history:             HistoryView(model: model)
-        case .convert:             ConvertView(model: model)
-        case .subscriptions:       SubscriptionsOverview(model: model)
-        case .subscription(let id): SubscriptionDetailView(model: model, id: id).id(id)
+        switch model.selection ?? .home {
+        case .library(let filter):
+            LibraryView(model: model, filter: filter)
+                .id(filter)
+                .safeAreaInset(edge: .top, spacing: 0) { NoticeStrip(model: model) }
+        case .subscriptions:
+            SubscriptionsOverview(model: model)
+        case .subscription(let id):
+            SubscriptionDetailView(model: model, id: id).id(id)
+        case .convert:
+            ConvertView(model: model)
         }
     }
 
     private var sidebar: some View {
         List(selection: $model.selection) {
             Section("Library") {
-                Label("Download", systemImage: "arrow.down.circle")
-                    .tag(SidebarItem.download)
-                Label("Queue", systemImage: "list.bullet.rectangle")
-                    .badge(model.pendingCount)
-                    .tag(SidebarItem.queue)
-                Label("History", systemImage: "clock")
-                    .tag(SidebarItem.history)
+                ForEach(LibraryFilter.allCases, id: \.self) { filter in
+                    Label(filter.title, systemImage: filter.symbol)
+                        .badge(filter == .all ? model.pendingCount : 0)
+                        .tag(SidebarItem.library(filter))
+                }
             }
 
             Section {
-                Label("All Subscriptions", systemImage: "dot.radiowaves.left.and.right")
-                    .badge(model.subscriptions.items.reduce(0) { $0 + $1.unseenCount })
-                    .tag(SidebarItem.subscriptions)
-                ForEach(model.subscriptions.items) { sub in
-                    Label {
-                        Text(sub.title).lineLimit(1)
-                    } icon: {
-                        ChannelAvatar(url: sub.avatarURL, title: sub.title, size: 18)
+                if model.subscriptions.items.isEmpty {
+                    Button {
+                        model.subscribeRequest = .init(link: "")
+                    } label: {
+                        Label("Follow a Channel…", systemImage: "plus.circle")
+                            .foregroundStyle(.secondary)
                     }
-                    .badge(sub.unseenCount)
-                    .opacity(sub.isEnabled ? 1 : 0.55)
-                    .tag(SidebarItem.subscription(sub.id))
-                    .contextMenu {
-                        Button("Check Now") { Task { await model.checkSubscription(sub.id) } }
-                        Divider()
-                        Button("Unsubscribe", role: .destructive) { model.unsubscribe(sub.id) }
+                    .buttonStyle(.plain)
+                } else {
+                    Label("All Channels", systemImage: "dot.radiowaves.left.and.right")
+                        .badge(model.subscriptions.items.reduce(0) { $0 + $1.unseenCount })
+                        .tag(SidebarItem.subscriptions)
+                    ForEach(model.subscriptions.items) { sub in
+                        Label {
+                            Text(sub.title).lineLimit(1)
+                        } icon: {
+                            ChannelAvatar(url: sub.avatarURL, title: sub.title, size: 18)
+                        }
+                        .badge(sub.unseenCount)
+                        .opacity(sub.isEnabled ? 1 : 0.55)
+                        .tag(SidebarItem.subscription(sub.id))
+                        .contextMenu {
+                            Button("Check Now") { Task { await model.checkSubscription(sub.id) } }
+                            Divider()
+                            Button("Unfollow", role: .destructive) { model.unsubscribe(sub.id) }
+                        }
                     }
                 }
             } header: {
                 HStack {
-                    Text("Subscriptions")
+                    Text("Channels")
                     Spacer()
                     Button {
                         model.subscribeRequest = .init(link: "")
@@ -108,8 +118,8 @@ struct ContentView: View {
                         Image(systemName: "plus")
                     }
                     .buttonStyle(.borderless)
-                    .help("Add Subscription")
-                    .accessibilityLabel("Add Subscription")
+                    .help("Follow a Channel")
+                    .accessibilityLabel("Follow a Channel")
                 }
             }
 
@@ -120,51 +130,61 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
-        .safeAreaInset(edge: .bottom) {
-            if let job = model.activeJob, model.selection != .queue {
-                SidebarActivity(job: job, remaining: model.pendingCount) {
-                    model.selection = .queue
-                }
-                .padding(10)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.smooth(duration: 0.3), value: model.activeJob?.id)
         .animation(.smooth(duration: 0.3), value: model.subscriptions.items.map(\.id))
     }
 }
 
-/// Compact progress in the sidebar, like Mail's activity indicator.
-private struct SidebarActivity: View {
-    let job: DownloadJob
-    let remaining: Int
-    let action: () -> Void
+/// One slim, quiet notice above the library when something needs attention.
+private struct NoticeStrip: View {
+    let model: AppModel
+    private var toolchain: Toolchain { model.toolchain }
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(remaining > 1 ? "Downloading \(remaining) items" : "Downloading")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    if !job.progressIsIndeterminate {
-                        Text(job.progress, format: .percent.precision(.fractionLength(0)))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+        Group {
+            if toolchain.hasChecked && !toolchain.isReady {
+                strip("shippingbox.fill", .orange,
+                      "My Videos needs \(toolchain.missingTools.joined(separator: " and ")) to download.") {
+                    Button("Finish Setup…") { model.showOnboarding = true }
+                }
+            } else if Diagnostics.shared.hasNewCrash {
+                strip("exclamationmark.bubble.fill", .orange, "My Videos quit unexpectedly last time.") {
+                    Button("Save Report…") {
+                        Diagnostics.shared.exportReport(activityLog: model.activityLog, toolchain: toolchain)
+                        Diagnostics.shared.markSeen()
+                    }
+                    Button("Dismiss") { Diagnostics.shared.markSeen() }
+                }
+            } else if toolchain.updateAvailable {
+                strip("arrow.down.app.fill", .blue, "A yt-dlp update keeps downloads working as sites change.") {
+                    if toolchain.operation == .updating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Update") { Task { await toolchain.updateYtdlp(log: model.log) } }
                     }
                 }
-                JobProgressBar(job: job)
-                Text(job.displayTitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            } else if model.prefs.cookieSource != .none, case .problem(let message, _) = model.signIn.state {
+                strip("person.crop.circle.badge.exclamationmark", .orange, message) {
+                    SettingsLink { Text("Fix…") }
+                }
             }
-            .padding(10)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular, in: .rect(cornerRadius: 12, style: .continuous))
-        .help("Show Queue")
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private func strip<Actions: View>(_ symbol: String, _ tint: Color, _ text: String,
+                                      @ViewBuilder actions: () -> Actions) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(tint)
+            Text(text).lineLimit(2)
+            Spacer()
+            actions()
+        }
+        .font(.callout)
+        .buttonStyle(.link)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(tint.opacity(0.1))
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 

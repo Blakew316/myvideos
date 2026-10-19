@@ -53,22 +53,64 @@ struct Snapshots {
 
     @Test func screens() async {
         let model = AppModel.shared
+        let art = (1...8).map { URL(fileURLWithPath: "/private/tmp/claude-501/-Users-justin-video-grabber-video-grabber-xcodeproj/c8172389-965f-4fab-8247-94d6ef823621/scratchpad/art/a\($0).jpg") }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        func sample(_ i: Int, _ title: String, _ channel: String, audio: Bool = false, daysAgo: Double = 0) -> HistoryItem {
+            HistoryItem(title: title, uploader: channel, sourceURL: "https://example.com/\(i)",
+                        thumbnailURL: art.isEmpty ? nil : art[i % art.count], filePaths: ["/tmp"],
+                        date: Date().addingTimeInterval(-daysAgo * 86400), isAudio: audio, isPlaylist: false,
+                        duration: Double(60 + i * 37), byteCount: 1_000_000)
+        }
+        let items = [sample(0, "Atom Animation — Free Public Domain Footage", "Public Domain Archive"),
+                     sample(1, "Me at the zoo", "jawed"),
+                     sample(2, "Get Lucky (feat. Pharrell Williams)", "Daft Punk", audio: true),
+                     sample(3, "8mm Countdown Leader", "Archive Films", daysAgo: 3),
+                     sample(4, "City at Night, Time-lapse", "Skyline Studio", daysAgo: 4),
+                     sample(5, "Morning Jazz", "Cafe Sessions", audio: true, daysAgo: 5)]
+        let downloading = DownloadJob(url: "https://example.com/d", options: DownloadOptions(destinationPath: "/tmp"),
+                                      info: MediaInfo(id: "d", title: "Big Buck Bunny (4K)", uploader: "Blender", duration: 600,
+                                                      thumbnailURL: art.last, webpageURL: nil, site: nil, isPlaylist: false,
+                                                      playlistCount: nil, track: nil, artist: nil, album: nil, isLive: false, channelURL: nil),
+                                      tags: MusicTags())
+        let columns = [GridItem(.adaptive(minimum: 208, maximum: 290), spacing: 22, alignment: .top)]
+        func header(_ title: String, _ count: Int) -> some View {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).font(.title2.weight(.bold))
+                Text("\(count)").font(.callout.weight(.medium)).foregroundStyle(.tertiary)
+            }
+        }
+        render("library", size: CGSize(width: 980, height: 860)) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 36) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        header("Downloading", 1)
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 26) {
+                            PendingCard(job: downloading, model: model)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 14) {
+                        header("Today", 3)
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 26) {
+                            ForEach(items.prefix(3)) { LibraryCard(item: $0, isSelected: $0.title == "Me at the zoo", play: {}, select: { _ in }) }
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 14) {
+                        header("This Week", 3)
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 26) {
+                            ForEach(items.suffix(3)) { LibraryCard(item: $0, isSelected: false, play: {}, select: { _ in }) }
+                        }
+                    }
+                }
+                .padding(28)
+            }
+            .background(WindowBackdrop())
+        }
+        render("library-empty", size: CGSize(width: 980, height: 700)) { LibraryView(model: model, filter: .music) }
         await model.toolchain.refresh()
-        model.urlString = ""
-        try? await Task.sleep(for: .milliseconds(300))
-        render("download-empty", size: CGSize(width: 820, height: 760)) { ComposerView(model: model) }
         model.urlString = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
         for _ in 0..<40 where model.previewInfo == nil { try? await Task.sleep(for: .milliseconds(500)) }
-        render("download-video", size: CGSize(width: 820, height: 900)) { ComposerView(model: model) }
-        let quality = model.prefs.quality
-        model.prefs.quality = .audio
-        render("download-audio", size: CGSize(width: 820, height: 900)) { ComposerView(model: model) }
-        render("download-options-audio", size: CGSize(width: 400, height: 560)) { DownloadOptionsPanel(model: model) }
-        model.prefs.quality = quality == .audio ? .best : quality
-        model.clipEnabled = true
-        render("download-options-video", size: CGSize(width: 400, height: 560)) { DownloadOptionsPanel(model: model) }
-        model.clipEnabled = false
-        model.prefs.quality = quality
+        render("add-card", size: CGSize(width: 480, height: 330)) { AddCard(model: model) }
+        render("downloads-popover", size: CGSize(width: 440, height: 200)) { DownloadsPopover(model: model) }
         model.urlString = ""
     }
 }

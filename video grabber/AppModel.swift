@@ -8,9 +8,47 @@ import Observation
 import SystemConfiguration
 import UserNotifications
 
+enum LibraryFilter: String, Hashable, CaseIterable {
+    case all, videos, music
+
+    var title: String {
+        switch self {
+        case .all: return "All Items"
+        case .videos: return "Videos"
+        case .music: return "Music"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .all: return "square.grid.2x2"
+        case .videos: return "film"
+        case .music: return "music.note"
+        }
+    }
+
+    func includes(isAudio: Bool) -> Bool {
+        switch self {
+        case .all: return true
+        case .videos: return !isAudio
+        case .music: return isAudio
+        }
+    }
+}
+
 enum SidebarItem: Hashable {
-    case download, queue, history, convert, subscriptions
+    case library(LibraryFilter)
+    case subscriptions
     case subscription(UUID)
+    case convert
+
+    static let home = SidebarItem.library(.all)
+}
+
+enum LibraryGrouping: String, CaseIterable, Identifiable {
+    case date, channel
+    var id: String { rawValue }
+    var title: String { self == .date ? "Date Added" : "Channel" }
 }
 
 /// The single source of truth shared by the main window, the menu bar extra, App Intents,
@@ -33,8 +71,20 @@ final class AppModel {
     static let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     // Navigation
-    var selection: SidebarItem? = .download
+    var selection: SidebarItem? = .home
     var showOnboarding = false
+    /// The Safari-style Downloads popover in the toolbar.
+    var showDownloads = false
+    /// The Activity inspector with yt-dlp/ffmpeg output (View › Show Activity).
+    var showActivity = false
+    /// The add card was dismissed for this link (so it doesn't pop back up while typing).
+    var addCardDismissedFor: String?
+    var libraryGrouping: LibraryGrouping = LibraryGrouping(rawValue: UserDefaults.standard.string(forKey: "libraryGrouping") ?? "") ?? .date {
+        didSet { UserDefaults.standard.set(libraryGrouping.rawValue, forKey: "libraryGrouping") }
+    }
+
+    /// Downloads that aren't in the library yet: running, waiting, paused or failed.
+    var pendingJobs: [DownloadJob] { jobs.filter { $0.phase != .finished && $0.phase != .cancelled } }
     /// Bumped to ask the composer to focus its link field.
     var focusRequest = 0
     /// Presents the Subscribe sheet, optionally prefilled with a link.
@@ -593,7 +643,7 @@ final class AppModel {
                              album: nil, isLive: false, channelURL: nil)
         let job = enqueue(url: item.sourceURL, options: options, info: info, tags: MusicTags())
         job.replacesHistoryID = item.id
-        selection = .queue
+        selection = .home
     }
 
     /// A previous download of the same video, if there is one.
@@ -620,7 +670,7 @@ final class AppModel {
         options.quality = item.isAudio ? .audio : (prefs.quality == .audio ? .best : prefs.quality)
         options.downloadPlaylist = item.isPlaylist
         enqueue(url: item.sourceURL, options: options, info: nil, tags: MusicTags())
-        selection = .queue
+        selection = .home
     }
 
     // MARK: - Subscriptions
@@ -878,7 +928,8 @@ final class AppModel {
         clipboardHasLink = false
         let trimmed = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        selection = .download
+        if case .library = selection {} else { selection = .home }
+        addCardDismissedFor = nil
         urlString = trimmed
     }
 
@@ -912,7 +963,7 @@ final class AppModel {
             options.quality = audioOnly ? .audio : (prefs.quality == .audio ? .best : prefs.quality)
         }
         let job = enqueue(url: trimmed, options: options, info: nil, tags: MusicTags())
-        if showQueue { selection = .queue }
+        if showQueue { selection = .home }
         return job
     }
 
@@ -964,7 +1015,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse) async {
         await MainActor.run {
-            AppModel.shared.selection = .history
+            AppModel.shared.selection = .home
             NSApp.activate()
         }
     }

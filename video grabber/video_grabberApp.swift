@@ -78,12 +78,12 @@ private struct AppCommands: Commands {
         }
         CommandGroup(replacing: .newItem) {
             Button("New Download") {
-                show(.download)
+                show(.home)
                 model.focusRequest += 1
             }
             .keyboardShortcut("n")
             Button("Paste and Download") {
-                show(.download)
+                show(.home)
                 if model.pasteFromClipboard() { model.downloadFromComposer() }
             }
             .keyboardShortcut("v", modifiers: [.command, .shift])
@@ -97,11 +97,19 @@ private struct AppCommands: Commands {
             Button("Sign In to a Site…") { openWindow(id: "signin") }
         }
         CommandGroup(before: .sidebar) {
-            Button("Download") { show(.download) }.keyboardShortcut("1")
-            Button("Queue") { show(.queue) }.keyboardShortcut("2")
-            Button("History") { show(.history) }.keyboardShortcut("3")
-            Button("Subscriptions") { show(.subscriptions) }.keyboardShortcut("4")
+            Button("All Items") { show(.library(.all)) }.keyboardShortcut("1")
+            Button("Videos") { show(.library(.videos)) }.keyboardShortcut("2")
+            Button("Music") { show(.library(.music)) }.keyboardShortcut("3")
+            Button("Channels") { show(.subscriptions) }.keyboardShortcut("4")
             Button("Convert") { show(.convert) }.keyboardShortcut("5")
+            Divider()
+            Button(model.showDownloads ? "Hide Downloads" : "Show Downloads") {
+                show(model.selection ?? .home)
+                model.showDownloads.toggle()
+            }
+            .keyboardShortcut("l", modifiers: [.command, .option])
+            Button(model.showActivity ? "Hide Activity" : "Show Activity") { model.showActivity.toggle() }
+                .keyboardShortcut("a", modifiers: [.command, .option])
             Divider()
         }
     }
