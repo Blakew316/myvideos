@@ -29,8 +29,24 @@ struct Snapshots {
             host.layoutSubtreeIfNeeded()
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
             host.cacheDisplay(in: host.bounds, to: rep)
+            // The cached bitmap is translucent; flatten it onto the window background so it
+            // looks the way it does on screen.
+            let scale = CGFloat(rep.pixelsWide) / size.width
+            guard let flat = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: rep.pixelsWide, pixelsHigh: rep.pixelsHigh,
+                                              bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                              colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                  let context = NSGraphicsContext(bitmapImageRep: flat) else { continue }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            window.appearance?.performAsCurrentDrawingAppearance {
+                NSColor.windowBackgroundColor.setFill()
+                NSRect(x: 0, y: 0, width: CGFloat(rep.pixelsWide), height: CGFloat(rep.pixelsHigh)).fill()
+            }
+            rep.draw(in: NSRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale),
+                     from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            NSGraphicsContext.restoreGraphicsState()
             let url = folder.appendingPathComponent("\(name)-\(dark ? "dark" : "light").png")
-            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            try? flat.representation(using: .png, properties: [:])?.write(to: url)
             window.orderOut(nil)
         }
     }
@@ -42,7 +58,7 @@ struct Snapshots {
         render("subscriptions-empty", size: CGSize(width: 760, height: 500)) { SubscriptionsOverview(model: model) }
         render("queue-empty", size: CGSize(width: 760, height: 500)) { QueueView(model: model) }
         render("onboarding", size: CGSize(width: 580, height: 660)) { OnboardingView(model: model) }
-        render("subscribe-sheet", size: CGSize(width: 520, height: 560)) { SubscribeSheet(model: model, link: "") }
+        render("subscribe-sheet", size: CGSize(width: 520, height: 300)) { SubscribeSheet(model: model, link: "") }
         render("settings", size: CGSize(width: 600, height: 640)) { SettingsView() }
         render("menubar", size: CGSize(width: 340, height: 260)) { MenuBarView() }
         render("main-window", size: CGSize(width: 1100, height: 860)) { ContentView() }

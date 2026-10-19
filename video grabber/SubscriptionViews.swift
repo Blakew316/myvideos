@@ -393,7 +393,6 @@ struct SubscribeSheet: View {
                     .onChange(of: link) { scheduleLoad() }
 
                 preview
-                    .frame(minHeight: 120)
                     .animation(.smooth(duration: 0.3), value: state)
 
                 if case .loaded = state {
@@ -426,7 +425,6 @@ struct SubscribeSheet: View {
             }
             .padding(24)
 
-            Spacer(minLength: 0)
             Divider()
             HStack {
                 Spacer()
@@ -440,7 +438,9 @@ struct SubscribeSheet: View {
             .controlSize(.large)
             .padding(20)
         }
-        .frame(width: 520, height: 560)
+        .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
+        .animation(.smooth(duration: 0.3), value: state)
         .background(WindowBackdrop())
         .onAppear {
             format = model.prefs.quality

@@ -27,7 +27,7 @@ nonisolated enum ConvertPreset: String, CaseIterable, Identifiable, Codable, Sen
         case .aac:        return "Best for Apple Music"
         case .mp3:        return "Plays anywhere"
         case .wav:        return "Uncompressed WAV"
-        case .compatible: return "H.264 for QuickTime & iPhone"
+        case .compatible: return "Plays on every Apple device"
         case .smaller:    return "720p, great for sharing"
         case .gif:        return "Silent, loops forever"
         }
