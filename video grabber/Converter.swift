@@ -105,7 +105,7 @@ final class ConvertJob: Identifiable {
         }
     }
 
-    private func fail(_ text: String) {
+    func fail(_ text: String) {
         phase = .failed
         message = text
     }

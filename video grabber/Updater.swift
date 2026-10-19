@@ -19,9 +19,13 @@ final class AppUpdater {
 
     var isConfigured: Bool { controller != nil }
 
-    var automaticallyChecks: Bool {
-        get { controller?.updater.automaticallyChecksForUpdates ?? false }
-        set { controller?.updater.automaticallyChecksForUpdates = newValue }
+    /// Mirrored in a stored property so SwiftUI notices changes.
+    var automaticallyChecks = false {
+        didSet {
+            if controller?.updater.automaticallyChecksForUpdates != automaticallyChecks {
+                controller?.updater.automaticallyChecksForUpdates = automaticallyChecks
+            }
+        }
     }
 
     private init() {
@@ -34,6 +38,7 @@ final class AppUpdater {
         }
         let controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         self.controller = controller
+        automaticallyChecks = controller.updater.automaticallyChecksForUpdates
         observation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
             MainActor.assumeIsolated { self?.canCheckForUpdates = updater.canCheckForUpdates }
         }

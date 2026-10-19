@@ -55,6 +55,9 @@ final class AppModel {
 
     // Conversions
     private(set) var conversions: [ConvertJob] = []
+    /// The conversion ffmpeg is working on — tracked separately so removing it from the
+    /// list doesn't let a second one start before ffmpeg has actually stopped.
+    private var runningConversion: ConvertJob?
     /// Files dropped on the Dock icon, waiting for a format choice.
     var stagedFiles: [URL] = []
     var convertPreset: ConvertPreset = ConvertPreset(rawValue: UserDefaults.standard.string(forKey: "convertPreset") ?? "") ?? .compatible {
@@ -467,8 +470,12 @@ final class AppModel {
             for file in files {
                 // Single songs use the (editable) tags; playlist tracks read their own.
                 var tags = job.tags
-                if files.count > 1, let ffprobe = toolchain.ffprobe {
-                    let embedded = await MediaTags.read(file, ffprobe: ffprobe)
+                if files.count > 1 {
+                    let embedded = if let ffprobe = toolchain.ffprobe {
+                        await MediaTags.read(file, ffprobe: ffprobe)
+                    } else {
+                        MusicTags(title: file.deletingPathExtension().lastPathComponent)
+                    }
                     let guess = MediaInfo(id: "", title: embedded.title, uploader: embedded.artist, duration: nil,
                                           thumbnailURL: nil, webpageURL: nil, site: nil, isPlaylist: false,
                                           playlistCount: nil, track: nil, artist: nil, album: nil,
@@ -552,8 +559,12 @@ final class AppModel {
     func fetchFeed(_ link: String) async -> FeedResult {
         guard let tool = toolchain.ytdlp else { return .failure("yt-dlp isn’t installed.") }
         var url = FeedParser.normalize(link)
+        // Playlists list oldest first, so their newest additions are at the end;
+        // channel upload tabs are newest first.
+        let isPlaylist = URLComponents(string: url)?.path == "/playlist"
+            || (URLComponents(string: url)?.queryItems?.contains { $0.name == "list" } ?? false)
         for _ in 0..<2 {
-            var args = ["-J", "--flat-playlist", "--yes-playlist", "--playlist-items", "1:15"]
+            var args = ["-J", "--flat-playlist", "--yes-playlist", "--playlist-items", isPlaylist ? "-15:" : "1:15"]
             args += await baseFetchArguments()
             args += ["--", url]
             guard let output = try? await ProcessRunner.run(tool, args) else {
@@ -567,7 +578,9 @@ final class AppModel {
                 continue
             }
             if feed.entries.isEmpty { return .failure("This doesn’t look like a channel or playlist with videos.") }
-            return .success(feed)
+            var newestFirst = feed
+            if isPlaylist { newestFirst.entries.reverse() }
+            return .success(newestFirst)
         }
         return .failure("Couldn’t find this channel’s videos.")
     }
@@ -617,7 +630,9 @@ final class AppModel {
         case .success(let feed):
             // Re-read: it may have changed (or synced) while the feed was loading.
             guard let current = subscriptions.subscription(id: id) else { return }
-            let fresh = FeedParser.newEntries(in: feed, seen: current.seenIDs)
+            // While paused, only refresh what's shown — new uploads stay "unseen" so they
+            // still download once the subscription is turned back on.
+            let fresh = current.isEnabled ? FeedParser.newEntries(in: feed, seen: current.seenIDs) : []
             subscriptions.update(id) {
                 $0.lastChecked = Date()
                 $0.lastError = nil
@@ -626,7 +641,7 @@ final class AppModel {
                 $0.seenIDs += fresh.map(\.id)
                 $0.unseenCount += fresh.count
             }
-            if !fresh.isEmpty, current.isEnabled {
+            if !fresh.isEmpty {
                 for entry in fresh { download(entry, from: current) }
                 Notifier.post(title: current.title,
                               body: fresh.count == 1 ? "New: \(fresh[0].title)" : "\(fresh.count) new uploads are downloading.",
@@ -678,6 +693,7 @@ final class AppModel {
     func removeConversion(_ job: ConvertJob) {
         job.cancel()
         conversions.removeAll { $0.id == job.id }
+        processConversions()
     }
 
     func clearFinishedConversions() {
@@ -685,15 +701,20 @@ final class AppModel {
     }
 
     private func processConversions() {
-        guard !conversions.contains(where: \.isActive),
+        guard runningConversion == nil,
               let next = conversions.first(where: { $0.phase == .waiting }) else { return }
         guard let ffmpeg = toolchain.ffmpeg else {
+            for job in conversions where job.phase == .waiting {
+                job.fail("ffmpeg isn’t installed. Install it in Settings → Components.")
+            }
             alert = AppAlert(title: "ffmpeg Isn’t Installed", message: "Install it in Settings → Components to convert files.")
             return
         }
         appendLog("$ ffmpeg (\(next.preset.title)) \(next.input.lastPathComponent)")
+        runningConversion = next
         next.start(ffmpeg: ffmpeg, ffprobe: toolchain.ffprobe) { [weak self] in
             guard let self else { return }
+            self.runningConversion = nil
             if next.phase == .finished {
                 Notifier.post(title: "Conversion Complete", body: next.output?.lastPathComponent ?? "",
                               enabled: self.prefs.notificationsEnabled)

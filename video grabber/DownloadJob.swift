@@ -299,7 +299,8 @@ final class DownloadJob: Identifiable {
             self.printFile = nil
         }
 
-        if pauseRequested && !cancelRequested {
+        // A pause that lands just as yt-dlp finishes successfully is no pause at all.
+        if pauseRequested && !cancelRequested && (signalled || (status != 0 && status != 101)) {
             pauseRequested = false
             phase = .paused
             statusLine = progressIsIndeterminate ? "Paused" : "Paused at \(Int(progress * 100))%"

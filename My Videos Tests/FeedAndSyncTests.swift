@@ -111,6 +111,24 @@ struct FeedAndSyncTests {
         #expect(Set(merged.seenIDs) == ["a", "b", "c"])
     }
 
+    @Test func userChoiceBeatsANewerRoutineCheck() {
+        let id = UUID()
+        // Mac A: the user turned the subscription off at t=100.
+        var macA = Subscription(id: id, url: "u", title: "X", createdAt: Date(timeIntervalSince1970: 0))
+        macA.isEnabled = false
+        macA.settingsModifiedAt = Date(timeIntervalSince1970: 100)
+        macA.modifiedAt = Date(timeIntervalSince1970: 100)
+        // Mac B: an automatic check at t=200 that hasn't seen that change yet.
+        var macB = Subscription(id: id, url: "u", title: "X", createdAt: Date(timeIntervalSince1970: 0))
+        macB.seenIDs = ["new"]
+        macB.lastChecked = Date(timeIntervalSince1970: 200)
+        macB.modifiedAt = Date(timeIntervalSince1970: 200)
+        let merged = SyncMerge.mergeSubscription(macA, macB)
+        #expect(!merged.isEnabled)
+        #expect(merged.seenIDs == ["new"])
+        #expect(merged.lastChecked == Date(timeIntervalSince1970: 200))
+    }
+
     @Test func removedSubscriptionsStayRemoved() {
         let sub = Subscription(url: "u", title: "Gone")
         let local = SyncPayload(subscriptions: [], subscriptionTombstones: [sub.id])

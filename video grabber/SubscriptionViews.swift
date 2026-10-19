@@ -271,7 +271,7 @@ struct SubscriptionDetailView: View {
         Binding {
             model.subscriptions.subscription(id: sub.id)?[keyPath: keyPath] ?? false
         } set: { value in
-            model.subscriptions.update(sub.id) { $0[keyPath: keyPath] = value }
+            model.subscriptions.updateChoices(sub.id) { $0[keyPath: keyPath] = value }
         }
     }
 
@@ -280,7 +280,7 @@ struct SubscriptionDetailView: View {
             let current = model.subscriptions.subscription(id: sub.id) ?? sub
             return current.isAudio ? .audio : current.quality
         } set: { value in
-            model.subscriptions.update(sub.id) {
+            model.subscriptions.updateChoices(sub.id) {
                 $0.isAudio = value == .audio
                 if value != .audio { $0.quality = value }
             }

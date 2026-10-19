@@ -35,6 +35,10 @@ nonisolated struct Subscription: Codable, Identifiable, Sendable, Equatable {
     var unseenCount = 0
     var createdAt = Date()
     var modifiedAt = Date()
+    /// When the user last changed a choice (on/off, format, Apple Music).
+    var settingsModifiedAt: Date?
+
+    var choicesModified: Date { settingsModifiedAt ?? createdAt }
 
     var formatDescription: String {
         isAudio ? "Audio" : quality.rawValue
@@ -193,6 +197,14 @@ final class SubscriptionStore {
         items[index].modifiedAt = Date()
         items[index].trim()
         save()
+    }
+
+    /// For user choices: also stamps settingsModifiedAt so they win when syncing.
+    func updateChoices(_ id: UUID, _ change: (inout Subscription) -> Void) {
+        update(id) {
+            change(&$0)
+            $0.settingsModifiedAt = Date()
+        }
     }
 
     func remove(_ id: UUID) {

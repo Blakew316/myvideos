@@ -24,7 +24,13 @@ final class Preferences {
     var sponsorBlock: SponsorBlockMode { didSet { save(sponsorBlock.rawValue, Keys.sponsorBlock, synced: true) } }
     var organize: OrganizeMode { didSet { save(organize.rawValue, Keys.organize, synced: true) } }
     var speedLimit: SpeedLimit { didSet { save(speedLimit.rawValue, Keys.speedLimit, synced: true) } }
-    var maxConcurrent: Int { didSet { save(maxConcurrent, Keys.maxConcurrent, synced: true) } }
+    var maxConcurrent: Int {
+        didSet {
+            save(maxConcurrent, Keys.maxConcurrent, synced: true)
+            // More slots: start waiting downloads now rather than when one finishes.
+            Task { @MainActor in AppModel.shared.processQueue() }
+        }
+    }
     /// Minutes between subscription checks.
     var subscriptionInterval: Int { didSet { save(subscriptionInterval, Keys.subscriptionInterval, synced: true) } }
 

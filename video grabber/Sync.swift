@@ -53,6 +53,14 @@ nonisolated enum SyncMerge {
     static func mergeSubscription(_ a: Subscription, _ b: Subscription) -> Subscription {
         var merged = a.modifiedAt >= b.modifiedAt ? a : b
         let other = a.modifiedAt >= b.modifiedAt ? b : a
+        // Routine checks bump modifiedAt constantly; user choices win by when they were made.
+        let choices = a.choicesModified >= b.choicesModified ? a : b
+        merged.title = choices.title
+        merged.isEnabled = choices.isEnabled
+        merged.isAudio = choices.isAudio
+        merged.quality = choices.quality
+        merged.addToMusic = choices.addToMusic
+        merged.settingsModifiedAt = choices.settingsModifiedAt
         merged.seenIDs = Array(NSOrderedSet(array: other.seenIDs + merged.seenIDs)) as? [String] ?? merged.seenIDs
         merged.downloadedIDs = Array(NSOrderedSet(array: other.downloadedIDs + merged.downloadedIDs)) as? [String] ?? merged.downloadedIDs
         if (other.lastChecked ?? .distantPast) > (merged.lastChecked ?? .distantPast) {
@@ -76,6 +84,8 @@ final class SyncService {
     private var pushTask: Task<Void, Never>?
     private var timer: Task<Void, Never>?
     private var lastWritten: SyncPayload?
+    /// A sync was requested while one was running; run again when it finishes.
+    private var pendingSync = false
 
     static var iCloudDrive: URL? {
         let url = URL(fileURLWithPath: NSHomeDirectory())
@@ -119,17 +129,31 @@ final class SyncService {
 
     func sync(model: AppModel) async {
         guard model.prefs.iCloudSync, let folder = Self.folder, let file = Self.fileURL else { return }
-        guard status != .syncing else { return }
+        guard status != .syncing else {
+            pendingSync = true
+            return
+        }
         status = .syncing
+        defer {
+            if pendingSync {
+                pendingSync = false
+                Task { [weak self, weak model] in
+                    guard let self, let model else { return }
+                    await self.sync(model: model)
+                }
+            }
+        }
 
+        let result: Result<SyncPayload?, Error> = await Task.detached {
+            Result { try Self.read(file: file, folder: folder) }
+        }.value
+        // Snapshot local state only now: anything that changed while iCloud was being
+        // read (a finished download, a new subscription) must be part of the merge.
         let local = SyncPayload(history: model.history.items,
                                 historyTombstones: model.history.tombstones,
                                 subscriptions: model.subscriptions.items,
                                 subscriptionTombstones: model.subscriptions.tombstones,
                                 settings: model.prefs.syncedSettings)
-        let result: Result<SyncPayload?, Error> = await Task.detached {
-            Result { try Self.read(file: file, folder: folder) }
-        }.value
 
         switch result {
         case .failure(let error):
@@ -140,6 +164,7 @@ final class SyncService {
             model.history.replace(with: merged.history, tombstones: merged.historyTombstones)
             model.subscriptions.replace(with: merged.subscriptions, tombstones: merged.subscriptionTombstones)
             if let settings = merged.settings { model.prefs.apply(settings) }
+            model.processQueue()  // a synced "simultaneous downloads" change may free slots
 
             if merged != remote {
                 let writeResult: Result<Void, Error> = await Task.detached {
