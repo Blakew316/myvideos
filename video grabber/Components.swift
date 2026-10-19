@@ -9,7 +9,26 @@ import AppKit
 // MARK: - Brand
 
 enum Brand {
-    static let indigo = Color(red: 0.38, green: 0.40, blue: 0.95)
+    /// The app's one color: a soft graphite, like brushed aluminum.
+    static let graphite = Color(red: 0.42, green: 0.43, blue: 0.46)
+}
+
+/// The main action on a screen, drawn like Apple TV's Play button: solid black in light
+/// mode, solid white in dark mode. No color needed to stand out.
+struct PrimaryCapsuleButtonStyle: ButtonStyle {
+    var height: CGFloat = 32
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+            .padding(.horizontal, 16)
+            .frame(height: height)
+            .background(Capsule().fill(Color.primary.opacity(isEnabled ? (configuration.isPressed ? 0.75 : 0.92) : 0.25)))
+            .contentShape(Capsule())
+            .animation(.smooth(duration: 0.15), value: configuration.isPressed)
+    }
 }
 
 /// The app's mark, drawn in SwiftUI so it matches the app icon at any size.
@@ -27,9 +46,9 @@ struct AppGlyph: View {
                                         Color(red: 0.07, green: 0.07, blue: 0.10)],
                                startPoint: .top, endPoint: .bottom)
             )
-            // A whisper of indigo glowing up from behind the play mark.
+            // A soft light glowing up from behind the play mark.
             tile.fill(
-                RadialGradient(colors: [Brand.indigo.opacity(0.38), .clear],
+                RadialGradient(colors: [.white.opacity(0.14), .clear],
                                center: .center, startRadius: 0, endRadius: size * 0.51)
             )
             tile.fill(
@@ -44,11 +63,11 @@ struct AppGlyph: View {
             Image(systemName: "play.fill")
                 .font(.system(size: size * 0.40, weight: .bold))
                 .foregroundStyle(
-                    LinearGradient(colors: [.white, Color(red: 0.84, green: 0.86, blue: 0.93)],
+                    LinearGradient(colors: [.white, Color(white: 0.84)],
                                    startPoint: .top, endPoint: .bottom)
                 )
                 .offset(x: size * 0.032)
-                .shadow(color: Color(red: 0.35, green: 0.38, blue: 1.0).opacity(0.45), radius: size * 0.05)
+                .shadow(color: .white.opacity(0.25), radius: size * 0.05)
                 .shadow(color: .black.opacity(0.35), radius: size * 0.022, y: size * 0.012)
         }
         .frame(width: size, height: size)
@@ -57,13 +76,14 @@ struct AppGlyph: View {
     }
 }
 
-/// A faint indigo glow at the top of the window, echoing the app icon.
+/// A whisper of light at the top of the window.
 struct WindowBackdrop: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        RadialGradient(colors: [Brand.indigo.opacity(scheme == .dark ? 0.14 : 0.07), .clear],
-                       center: .top, startRadius: 0, endRadius: 560)
+        // Barely-there light from above, so the page has depth without any color.
+        LinearGradient(colors: [Color.white.opacity(scheme == .dark ? 0.035 : 0.0), .clear],
+                       startPoint: .top, endPoint: .center)
             .ignoresSafeArea()
             .allowsHitTesting(false)
     }
@@ -155,8 +175,11 @@ struct IconTile: View {
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(
+                // One graphite finish everywhere (like System Settings' gray icons); `color`
+                // is kept so callers can say what a row is about without painting it.
                 RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-                    .fill(color.gradient)
+                    .fill(LinearGradient(colors: [Color(white: 0.50), Color(white: 0.30)],
+                                         startPoint: .top, endPoint: .bottom))
             )
             .accessibilityHidden(true)
     }

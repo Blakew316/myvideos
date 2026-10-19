@@ -37,7 +37,7 @@ struct AddLinkField: View {
                 } else {
                     Image(systemName: "link")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(focused ? Color.accentColor : .secondary)
+                        .foregroundStyle(focused ? .primary : .secondary)
                 }
             }
             .frame(width: 22)
@@ -60,14 +60,8 @@ struct AddLinkField: View {
                 .buttonStyle(.plain)
                 .help("Clear")
             }
-            Button(action: primaryAction) {
-                Text(model.urlString.isEmpty ? "Paste" : "Download")
-                    .font(.system(size: 14, weight: .semibold))
-                    .padding(.horizontal, 10)
-                    .frame(height: 30)
-            }
-            .buttonStyle(.glassProminent)
-            .buttonBorderShape(.capsule)
+            Button(model.urlString.isEmpty ? "Paste" : "Download", action: primaryAction)
+                .buttonStyle(PrimaryCapsuleButtonStyle(height: 34))
             .disabled(!model.urlString.isEmpty && !model.isValidURL)
             .help(model.urlString.isEmpty ? "Paste a copied link" : "Download this link")
         }
@@ -77,8 +71,7 @@ struct AddLinkField: View {
         .frame(maxWidth: 680)
         .glassEffect(.regular.interactive(), in: Capsule())
         .overlay(
-            Capsule().strokeBorder(focused ? Color.accentColor.opacity(0.7) : Color.primary.opacity(hovering ? 0.14 : 0.08),
-                                   lineWidth: focused ? 1.5 : 1)
+            Capsule().strokeBorder(Color.primary.opacity(focused ? 0.28 : hovering ? 0.14 : 0.08), lineWidth: 1)
         )
         .shadow(color: .black.opacity(focused ? 0.14 : 0.07), radius: focused ? 18 : 10, y: 4)
         .onHover { hovering = $0 }
@@ -194,11 +187,8 @@ struct AddCard: View {
                     model.downloadFromComposer()
                 } label: {
                     Text(model.activeJob == nil ? "Download" : "Add to Downloads")
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 8)
                 }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
+                .buttonStyle(PrimaryCapsuleButtonStyle(height: 32))
                 .keyboardShortcut(.defaultAction)
                 .disabled(!model.isValidURL || !model.toolchain.isReady)
             }
@@ -249,7 +239,7 @@ struct AddCard: View {
                         if let existing = model.existingDownload(link: model.trimmedURL, info: info) {
                             Label("In Your Library", systemImage: "checkmark.circle.fill")
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(.green)
+                                .foregroundStyle(.secondary)
                                 .help("Downloaded \(existing.date.formatted(date: .abbreviated, time: .shortened))")
                         }
                         if let link = model.subscribableLink, !model.subscriptions.contains(url: link) {

@@ -273,6 +273,10 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
         var args = quality.formatArguments
         if isAudio {
             args += ["-x", "--audio-format", audioFormat.rawValue, "--audio-quality", audioBitrate.rawValue]
+        } else {
+            // AVI, WMV, FLV… can't hold cover art or chapters; Matroska holds anything. The
+            // download then becomes a QuickTime-friendly MP4 (see PlayableConverter).
+            args += ["--remux-video", "mp4>mp4/mov>mov/mkv"]
         }
 
         // Cap the title (not the whole path) so long titles stay under macOS's 255-byte limit.
@@ -330,7 +334,7 @@ nonisolated struct DownloadOptions: Codable, Sendable, Equatable {
         }
         args += cookieArguments
         // "--" so a URL can never be misread as an option.
-        args += ["--", url]
+        args += ["--", LinkRewrite.forDownloader(url)]
         return args
     }
 }
@@ -558,5 +562,26 @@ nonisolated enum ByteSize {
 
     static func string(_ bytes: Double) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
+/// Links yt-dlp handles better in another form.
+nonisolated enum LinkRewrite {
+    /// vimeo.com/123 now demands a signed-in browser; the player address of the same
+    /// video doesn't. Unlisted videos keep their privacy hash (vimeo.com/123/abcdef).
+    static func forDownloader(_ link: String) -> String {
+        guard let url = URL(string: link), let host = url.host?.lowercased(),
+              host == "vimeo.com" || host == "www.vimeo.com" else { return link }
+        let parts = url.path.split(separator: "/").map(String.init)
+        guard let id = parts.first, !id.isEmpty, id.allSatisfy(\.isNumber), parts.count <= 2 else { return link }
+        var player = "https://player.vimeo.com/video/\(id)"
+        if parts.count == 2 {
+            guard parts[1].allSatisfy(\.isHexDigit) else { return link }
+            player += "?h=\(parts[1])"
+        } else if let hash = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "h" })?.value {
+            player += "?h=\(hash)"
+        }
+        return player
     }
 }

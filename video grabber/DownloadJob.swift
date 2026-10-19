@@ -72,6 +72,10 @@ final class DownloadJob: Identifiable {
     private var streamCount = 1
     private var streamIndex = -1
     private var impersonating = false
+    private var toolchain: Toolchain?
+    private var converter: PlayableConverter?
+    /// Cover art yt-dlp wrote before embedding it; left behind if the download fails.
+    private var thumbnailFiles: [URL] = []
     private var log: (String) -> Void = { _ in }
     private var completion: () -> Void = {}
 
@@ -89,6 +93,7 @@ final class DownloadJob: Identifiable {
         guard !isActive else { return }
         self.log = log
         self.completion = completion
+        self.toolchain = toolchain
         reset()
 
         guard let tool = toolchain.ytdlp else {
@@ -157,6 +162,11 @@ final class DownloadJob: Identifiable {
             statusLine = "Cancelled"
             return
         }
+        if let converter {
+            statusLine = "Stopping…"
+            converter.cancel()
+            return
+        }
         guard let process, process.isRunning else { return }
         cancelRequested = true
         statusLine = "Stopping…"
@@ -178,6 +188,7 @@ final class DownloadJob: Identifiable {
         itemIndex = 0
         itemCount = 0
         savedFiles = []
+        thumbnailFiles = []
         errorMessage = nil
         lastError = ""
         cancelRequested = false
@@ -197,6 +208,9 @@ final class DownloadJob: Identifiable {
 
             if line.hasPrefix("ERROR:") || line.contains(" ERROR:") {
                 lastError = line
+            }
+            if line.contains("Writing video thumbnail"), let path = line.components(separatedBy: " to: ").last {
+                thumbnailFiles.append(URL(fileURLWithPath: path))
             }
             if let formats = Self.capture(line, #"Downloading \d+ format\(s\): (\S+)"#) {
                 streamCount = max(1, formats.split(separator: "+").count)
@@ -315,23 +329,18 @@ final class DownloadJob: Identifiable {
             phase = .cancelled
             statusLine = "Cancelled"
             progressIsIndeterminate = false
-        } else if status == 0 || status == 101 || !savedFiles.isEmpty {
-            // 101: --max-downloads stopped yt-dlp after the one file we asked for.
+        } else if !savedFiles.isEmpty || status == 0 {
+            // 101: --max-downloads stopped yt-dlp after the one file we asked for — but it
+            // exits that way even when nothing could be downloaded, so only files count.
             // A playlist can also exit non-zero when a single entry is unavailable, but
             // whatever did download is still a success.
             if options.subtitles == .embed { removeLeftoverSubtitles() }
-            phase = .finished
-            progress = 1
-            progressIsIndeterminate = false
-            if let first = savedFiles.first { currentFile = first.lastPathComponent }
-            let size = savedFiles.reduce(Int64(0)) { $0 + Self.fileSize($1) }
-            if savedFiles.count > 1 {
-                statusLine = "\(savedFiles.count) files · \(ByteSize.string(Double(size)))"
-                if status != 0 && status != 101 { statusLine += " · some videos were unavailable" }
-            } else {
-                statusLine = size > 0 ? "\(ByteSize.string(Double(size))) · Saved to \(options.destination.lastPathComponent)"
-                                      : "Saved to \(options.destination.lastPathComponent)"
+            if !options.isAudio, let ffmpeg = toolchain?.ffmpeg, let ffprobe = toolchain?.ffprobe {
+                makePlayable(ffmpeg: ffmpeg, ffprobe: ffprobe, status: status)
+                return
             }
+            succeed(status: status)
+            return
         } else {
             fail(friendlyError(code: status))
             return
@@ -339,7 +348,58 @@ final class DownloadJob: Identifiable {
         completion()
     }
 
+    /// Converts anything QuickTime can't open (WebM, MKV, AVI, VP9, AV1, Opus…) to MP4.
+    private func makePlayable(ffmpeg: URL, ffprobe: URL, status: Int32) {
+        phase = .processing
+        progress = 0
+        progressIsIndeterminate = true
+        statusLine = "Making it play everywhere…"
+        let converter = PlayableConverter()
+        self.converter = converter
+        Task { @MainActor in
+            var files: [URL] = []
+            for (index, file) in savedFiles.enumerated() {
+                let result = await converter.makePlayable(file, ffmpeg: ffmpeg, ffprobe: ffprobe, log: log) { [weak self] value in
+                    guard let self else { return }
+                    self.progressIsIndeterminate = false
+                    self.progress = (Double(index) + value) / Double(max(1, self.savedFiles.count))
+                    self.statusLine = "Converting for QuickTime… \(Int(self.progress * 100))%"
+                }
+                if converter.cancelled { break }
+                files.append(result ?? file)
+            }
+            self.converter = nil
+            if converter.cancelled {
+                phase = .cancelled
+                statusLine = "Cancelled"
+                progressIsIndeterminate = false
+                completion()
+                return
+            }
+            savedFiles = files
+            succeed(status: status)
+        }
+    }
+
+    private func succeed(status: Int32) {
+        phase = .finished
+        progress = 1
+        progressIsIndeterminate = false
+        if let first = savedFiles.first { currentFile = first.lastPathComponent }
+        let size = savedFiles.reduce(Int64(0)) { $0 + Self.fileSize($1) }
+        if savedFiles.count > 1 {
+            statusLine = "\(savedFiles.count) files · \(ByteSize.string(Double(size)))"
+            if status != 0 && status != 101 { statusLine += " · some videos were unavailable" }
+        } else {
+            statusLine = size > 0 ? "\(ByteSize.string(Double(size))) · Saved to \(options.destination.lastPathComponent)"
+                                  : "Saved to \(options.destination.lastPathComponent)"
+        }
+        completion()
+    }
+
     private func fail(_ message: String) {
+        for file in thumbnailFiles { try? FileManager.default.removeItem(at: file) }
+        thumbnailFiles = []
         phase = .failed
         errorMessage = message
         technicalError = lastError.isEmpty ? nil : lastError
@@ -386,6 +446,9 @@ final class DownloadJob: Identifiable {
         if has("sign in to confirm", "age-restricted", "age restricted", "not a bot", "login required",
                "requires authentication", "logged-in", "logged in", "private video", "members-only", "join this channel") {
             return "This video needs you to be signed in. Sign in under Settings → Accounts, then try again."
+        }
+        if has("drm protected", "drm-protected", "is drm", "widevine", "fairplay") {
+            return "This video is copy-protected (DRM) by the site, so it can’t be downloaded."
         }
         if has("requested format is not available", "requested format not available", "no video formats found") {
             return "No downloadable stream was found. Try “Audio only”, or check that the link is a video page."

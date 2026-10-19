@@ -371,7 +371,7 @@ struct LibraryCard: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.accentColor, lineWidth: isSelected ? 3 : 0)
+                        .strokeBorder(Color.primary.opacity(0.85), lineWidth: isSelected ? 3 : 0)
                 }
                 .shadow(color: .black.opacity(hovering ? 0.22 : 0.10), radius: hovering ? 16 : 6, y: hovering ? 8 : 3)
                 .scaleEffect(hovering ? 1.015 : 1)
@@ -563,7 +563,7 @@ private struct EmptyLibrary: View {
                 Image(systemName: "play.rectangle.on.rectangle.fill")
                     .font(.system(size: 54, weight: .regular))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(.secondary)
                     .padding(.bottom, 8)
                 Text("Save anything you watch or hear.")
                     .font(.system(size: 30, weight: .bold))
@@ -760,9 +760,9 @@ private struct ShortcutTile: View {
             HStack(spacing: 13) {
                 Image(systemName: symbol)
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(.primary)
                     .frame(width: 38, height: 38)
-                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.callout.weight(.semibold))

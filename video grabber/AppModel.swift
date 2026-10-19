@@ -316,7 +316,7 @@ final class AppModel {
         guard let tool = toolchain.ytdlp else { return .failed("yt-dlp isn’t installed.") }
         var args = ["-J", "--flat-playlist", playlist ? "--yes-playlist" : "--no-playlist"]
         args += await baseFetchArguments()
-        args += ["--", url]
+        args += ["--", LinkRewrite.forDownloader(url)]
         do {
             let output = try await ProcessRunner.run(tool, args)
             if Task.isCancelled { return .empty }

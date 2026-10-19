@@ -16,7 +16,7 @@ struct ChannelAvatar: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(LinearGradient(colors: [Brand.indigo.opacity(0.85), Brand.indigo.opacity(0.55)],
+            Circle().fill(LinearGradient(colors: [Color(white: 0.52), Color(white: 0.32)],
                                          startPoint: .top, endPoint: .bottom))
             Text(String(title.first ?? "•").uppercased())
                 .font(.system(size: size * 0.45, weight: .semibold, design: .rounded))
